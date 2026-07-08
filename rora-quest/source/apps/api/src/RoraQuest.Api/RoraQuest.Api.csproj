@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="8.0.5" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RoraQuest.Modules\CalendarIntegration\CalendarIntegration.csproj" />
+    <ProjectReference Include="..\RoraQuest.Modules\Checklist\Checklist.csproj" />
+    <ProjectReference Include="..\RoraQuest.Modules\IntegrationSettings\IntegrationSettings.csproj" />
+    <ProjectReference Include="..\RoraQuest.Modules\Notification\Notification.csproj" />
+    <ProjectReference Include="..\RoraQuest.Modules\PlanningRules\PlanningRules.csproj" />
+    <ProjectReference Include="..\RoraQuest.Modules\Reports\Reports.csproj" />
+    <ProjectReference Include="..\RoraQuest.Modules\Scorecard\Scorecard.csproj" />
+    <ProjectReference Include="..\RoraQuest.Modules\TaskManagement\TaskManagement.csproj" />
+    <ProjectReference Include="..\RoraQuest.Modules\Tracking\Tracking.csproj" />
+    <ProjectReference Include="..\RoraQuest.Infrastructure\RoraQuest.Infrastructure.csproj" />
+    <ProjectReference Include="..\RoraQuest.Shared\RoraQuest.Shared.csproj" />
+  </ItemGroup>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>
+
