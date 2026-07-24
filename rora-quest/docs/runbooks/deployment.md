@@ -74,7 +74,7 @@ az keyvault secret set \
 az keyvault secret set \
   --vault-name $KEY_VAULT_NAME \
   --name "EntraClientSecret" \
-  --value "REDACTED"
+  --value "<palceholder>"
 ```
 
 **Important:** After this step, verify the API container app can read secrets:
