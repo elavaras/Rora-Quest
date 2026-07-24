@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Node
+source/apps/web/node_modules
+source/apps/web/.next
+
+# .NET build artifacts
+source/apps/api/src/**/bin
+source/apps/api/src/**/obj
+
+# Local config / secrets
+**/.env.local
+**/appsettings.Development.json
+**/user-secrets.json
+
+# Infra source (not needed in image)
+infra
+docs
+scripts
+
+# IDE
+.vscode
+.idea
+*.user

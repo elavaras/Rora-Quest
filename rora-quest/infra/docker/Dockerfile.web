@@ -1,0 +1,37 @@
+# Multi-stage build for RoraQuest Next.js 14 frontend (standalone output)
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY source/apps/web/package.json source/apps/web/package-lock.json ./
+RUN npm ci --prefer-offline
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY source/apps/web/ .
+
+# Standalone output bundles everything needed into .next/standalone
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# Minimal runtime image
+FROM node:20-alpine AS runtime
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Non-root user
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
+# Copy only standalone output + static assets
+COPY --from=builder --chown=appuser:appgroup /app/.next/standalone ./
+COPY --from=builder --chown=appuser:appgroup /app/.next/static ./.next/static
+COPY --from=builder --chown=appuser:appgroup /app/public ./public
+
+USER appuser
+
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+CMD ["node", "server.js"]

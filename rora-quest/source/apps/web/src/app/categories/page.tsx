@@ -1,6 +1,7 @@
  "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { getApiAuthHeaders } from "../lib/user-session";
 
 type Category = {
   id: string;
@@ -21,10 +22,10 @@ async function apiCall<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
-      "X-User-Id": "demo-user",
+      ...getApiAuthHeaders(),
       ...(init?.headers ?? {})
     },
+    credentials: "include",
     cache: "no-store"
   });
 

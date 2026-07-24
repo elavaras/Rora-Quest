@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using Dapper;
 using Npgsql;
@@ -17,6 +18,14 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
 {
     private readonly NpgsqlDataSource _dataSource;
 
+    // Process-lifetime write-through cache of the per-user aggregate.
+    // The whole aggregate is loaded from Postgres with ~15 SELECTs; without a cache every
+    // service call (and the weekly view fires several in parallel) re-hydrates it over a
+    // remote connection, which dominates latency. All service access is serialized under the
+    // service lock and follows a Load -> mutate -> Save model, so a cached reference stays
+    // consistent: Save refreshes the cache after commit, and evicts it if persistence fails.
+    private readonly ConcurrentDictionary<string, UserData> _cache = new(StringComparer.Ordinal);
+
     static PostgresRoraQuestStore()
     {
         // Map snake_case columns to PascalCase record parameters/properties.
@@ -29,6 +38,18 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
     }
 
     public UserData Load(string userId)
+    {
+        if (_cache.TryGetValue(userId, out var cached))
+        {
+            return cached;
+        }
+
+        var hydrated = HydrateFromDb(userId);
+        _cache[userId] = hydrated;
+        return hydrated;
+    }
+
+    private UserData HydrateFromDb(string userId)
     {
         using var conn = _dataSource.OpenConnection();
         var data = new UserData();
@@ -51,7 +72,7 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
         // Tasks
         foreach (var t in conn.Query<TaskRow>(
             @"SELECT id, user_id, title, description, category_id, sub_category_id, planned_week_start,
-                     assigned_to, priority, status, due_date, start_at, end_at, calendar_event_id,
+                     planned_date, pattern, difficulty, assigned_to, priority, status, due_date, start_at, end_at, calendar_event_id,
                      reminder_at, question_and_reasoning, logic_notes, algorithm_notes, diagram_content,
                      created_at, updated_at, row_version
               FROM task_items WHERE user_id = @u", arg))
@@ -65,6 +86,9 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                 CategoryId = t.CategoryId,
                 SubCategoryId = t.SubCategoryId,
                 PlannedWeekStart = DateOnly.FromDateTime(t.PlannedWeekStart),
+                PlannedDate = t.PlannedDate.HasValue ? DateOnly.FromDateTime(t.PlannedDate.Value) : null,
+                Pattern = t.Pattern,
+                Difficulty = string.IsNullOrWhiteSpace(t.Difficulty) ? null : Enum.Parse<Difficulty>(t.Difficulty),
                 AssignedTo = t.AssignedTo,
                 Priority = t.Priority,
                 Status = Enum.Parse<TaskStatus>(t.Status),
@@ -86,12 +110,12 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
 
         // Sub-steps
         foreach (var s in conn.Query<SubStepRow>(
-            @"SELECT id, task_item_id, title, is_done, order_index, completed_at, row_version
+            @"SELECT id, task_item_id, title, is_done, order_index, completed_at, row_version, weight
               FROM task_sub_steps WHERE task_item_id IN (SELECT id FROM task_items WHERE user_id = @u)", arg))
         {
             if (data.Tasks.TryGetValue(s.TaskItemId, out var task))
             {
-                task.SubSteps.Add(new TaskSubStep(s.Id, s.Title, s.IsDone, s.OrderIndex, s.CompletedAt, s.RowVersion));
+                task.SubSteps.Add(new TaskSubStep(s.Id, s.Title, s.IsDone, s.OrderIndex, s.CompletedAt, s.RowVersion, s.Weight));
             }
         }
 
@@ -160,14 +184,26 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
         }
 
         foreach (var d in conn.Query<DraftRow>(
-            @"SELECT id, checklist_import_id, order_index, text, week_number, sub_category_name
+            @"SELECT id, checklist_import_id, order_index, text, week_number, sub_category_name, month_label
               FROM checklist_draft_items
               WHERE checklist_import_id IN (SELECT id FROM checklist_imports WHERE user_id = @u)
               ORDER BY order_index", arg))
         {
             if (data.Imports.TryGetValue(d.ChecklistImportId, out var import))
             {
-                import.DraftItems.Add(new ChecklistDraftItem(d.Id, d.OrderIndex, d.Text, d.WeekNumber, d.SubCategoryName));
+                import.DraftItems.Add(new ChecklistDraftItem(d.Id, d.OrderIndex, d.Text, d.WeekNumber, d.SubCategoryName, d.MonthLabel));
+            }
+        }
+
+        foreach (var c in conn.Query<ConfidenceDraftRow>(
+            @"SELECT id, checklist_import_id, order_index, text, week_number, sub_category_name, month_label
+              FROM checklist_confidence_items
+              WHERE checklist_import_id IN (SELECT id FROM checklist_imports WHERE user_id = @u)
+              ORDER BY order_index", arg))
+        {
+            if (data.Imports.TryGetValue(c.ChecklistImportId, out var import))
+            {
+                import.ConfidenceItems.Add(new ConfidenceDraftItem(c.Id, c.OrderIndex, c.Text, c.WeekNumber, c.SubCategoryName, c.MonthLabel));
             }
         }
 
@@ -179,6 +215,26 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
             var weekStart = DateOnly.FromDateTime(w.WeekStartDate);
             data.WeekPlans[weekStart] = new WeekPlan(
                 weekStart, Enum.Parse<WorkloadMode>(w.WorkloadMode), w.Notes, w.CreatedAt, w.UpdatedAt);
+        }
+
+        // Week confidence items
+        foreach (var c in conn.Query<WeekConfidenceRow>(
+            @"SELECT id, user_id, week_start, sub_category_id, label, text, is_done, order_index, created_at, updated_at
+              FROM week_confidence_items WHERE user_id = @u", arg))
+        {
+            data.ConfidenceItems[c.Id] = new WeekConfidenceItem
+            {
+                Id = c.Id,
+                UserId = c.UserId,
+                WeekStart = DateOnly.FromDateTime(c.WeekStart),
+                SubCategoryId = c.SubCategoryId,
+                Label = c.Label,
+                Text = c.Text,
+                IsDone = c.IsDone,
+                OrderIndex = c.OrderIndex,
+                CreatedAt = c.CreatedAt,
+                UpdatedAt = c.UpdatedAt
+            };
         }
 
         // Rules
@@ -246,6 +302,179 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
 
     public void Save(string userId, UserData data)
     {
+        try
+        {
+            Persist(userId, data);
+            // Persistence succeeded: the mutated aggregate is now the source of truth in memory too.
+            _cache[userId] = data;
+        }
+        catch
+        {
+            // Persistence failed: drop the (now possibly dirty) cached graph so the next Load
+            // re-hydrates a clean copy from the database.
+            _cache.TryRemove(userId, out _);
+            throw;
+        }
+    }
+
+    public int DeleteTasks(string userId, IReadOnlyCollection<Guid> taskIds)
+    {
+        if (taskIds.Count == 0) return 0;
+        var ids = taskIds is Guid[] arr ? arr : taskIds.ToArray();
+
+        // Targeted delete: remove only the selected task rows. task_sub_steps and
+        // task_reference_links cascade via ON DELETE CASCADE, so this is a single round-trip
+        // instead of re-persisting the whole user aggregate (hundreds of row inserts).
+        using var conn = _dataSource.OpenConnection();
+        using var cmd = new NpgsqlCommand(
+            "DELETE FROM task_items WHERE user_id = @u AND id = ANY(@ids)", conn);
+        cmd.Parameters.AddWithValue("u", userId);
+        cmd.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid) { Value = ids });
+        var removed = cmd.ExecuteNonQuery();
+
+        // Keep the write-through cache consistent even if the caller mutated a different
+        // reference (defensive; normally the cached graph IS the one the service mutated).
+        if (_cache.TryGetValue(userId, out var cached))
+        {
+            foreach (var id in taskIds) cached.Tasks.Remove(id);
+        }
+        return removed;
+    }
+
+    public void SaveNotificationSettings(string userId, NotificationSettings settings)
+    {
+        using var conn = _dataSource.OpenConnection();
+        using var tx = conn.BeginTransaction();
+        EnsureUserExists(conn, tx, userId);
+
+        Exec(conn, tx,
+            @"INSERT INTO notification_settings (user_id, daily_digest_time, evening_reminder_time, teams_destination, updated_at)
+              VALUES (@user, @daily, @evening, @teams, NOW())
+              ON CONFLICT (user_id) DO UPDATE SET
+                daily_digest_time = EXCLUDED.daily_digest_time,
+                evening_reminder_time = EXCLUDED.evening_reminder_time,
+                teams_destination = EXCLUDED.teams_destination,
+                updated_at = NOW()",
+            p =>
+            {
+                p.AddWithValue("user", userId);
+                p.AddWithValue("daily", settings.DailyDigestTime);
+                p.AddWithValue("evening", settings.EveningReminderTime);
+                p.AddWithValue("teams", settings.TeamsDestination);
+            });
+
+        tx.Commit();
+    }
+
+    public void UpsertIntegration(string userId, IntegrationSetting setting)
+    {
+        using var conn = _dataSource.OpenConnection();
+        using var tx = conn.BeginTransaction();
+        EnsureUserExists(conn, tx, userId);
+
+        // Keep exactly one row per provider for the user (historical schema allows multiple accounts).
+        Exec(conn, tx,
+            "DELETE FROM integration_settings WHERE user_id = @u AND LOWER(provider) = LOWER(@p)",
+            p =>
+            {
+                p.AddWithValue("u", userId);
+                p.AddWithValue("p", setting.Provider);
+            });
+
+        Exec(conn, tx,
+            @"INSERT INTO integration_settings
+                (id, user_id, provider, account_identifier, access_token_ref, refresh_token_ref,
+                 token_expiry_utc, is_connected, last_sync_at, created_at, updated_at)
+              VALUES
+                (@id, @user, @provider, @account, @access, @refresh, @expiry, @connected, @sync, NOW(), NOW())",
+            p =>
+            {
+                p.AddWithValue("id", setting.Id == Guid.Empty ? Guid.NewGuid() : setting.Id);
+                p.AddWithValue("user", userId);
+                p.AddWithValue("provider", setting.Provider);
+                p.AddWithValue("account", setting.AccountIdentifier);
+                p.AddWithValue("access", setting.AccessTokenRef);
+                p.AddWithValue("refresh", setting.RefreshTokenRef);
+                p.AddWithValue("expiry", setting.TokenExpiryUtc);
+                p.AddWithValue("connected", setting.IsConnected);
+                p.AddWithValue("sync", setting.LastSyncAt);
+            });
+
+        tx.Commit();
+    }
+
+    public bool DisconnectIntegration(string userId, string provider)
+    {
+        using var conn = _dataSource.OpenConnection();
+        using var tx = conn.BeginTransaction();
+        var now = DateTimeOffset.UtcNow;
+        using var cmd = new NpgsqlCommand(
+            @"UPDATE integration_settings
+              SET is_connected = FALSE,
+                  token_expiry_utc = @now,
+                  last_sync_at = @now,
+                  updated_at = NOW()
+              WHERE user_id = @u AND LOWER(provider) = LOWER(@p)", conn, tx);
+        cmd.Parameters.AddWithValue("now", now);
+        cmd.Parameters.AddWithValue("u", userId);
+        cmd.Parameters.AddWithValue("p", provider);
+        var affected = cmd.ExecuteNonQuery();
+        tx.Commit();
+
+        if (affected > 0 && _cache.TryGetValue(userId, out var cached))
+        {
+            var key = cached.Integrations.Keys.FirstOrDefault(k => string.Equals(k, provider, StringComparison.OrdinalIgnoreCase));
+            if (key is not null && cached.Integrations.TryGetValue(key, out var integration))
+            {
+                integration.IsConnected = false;
+                integration.LastSyncAt = now;
+                integration.TokenExpiryUtc = now;
+            }
+        }
+
+        return affected > 0;
+    }
+
+    public void AddNotificationSchedule(string userId, NotificationSchedule schedule)
+    {
+        using var conn = _dataSource.OpenConnection();
+        using var tx = conn.BeginTransaction();
+        EnsureUserExists(conn, tx, userId);
+
+        Exec(conn, tx,
+            @"INSERT INTO notification_schedules (id, user_id, task_item_id, channel, scheduled_at, status, sent_at)
+              VALUES (@id, @user, @task, @channel, @scheduled, @status, @sent)",
+            p =>
+            {
+                p.AddWithValue("id", schedule.Id);
+                p.AddWithValue("user", userId);
+                p.AddWithValue("task", (object?)schedule.TaskId ?? DBNull.Value);
+                p.AddWithValue("channel", schedule.Channel);
+                p.AddWithValue("scheduled", schedule.ScheduledAt);
+                p.AddWithValue("status", schedule.Status);
+                p.AddWithValue("sent", (object?)schedule.SentAt ?? DBNull.Value);
+            });
+
+        tx.Commit();
+    }
+
+    public IReadOnlyCollection<string> GetKnownUserIds()
+    {
+        using var conn = _dataSource.OpenConnection();
+        return conn.Query<string>("SELECT id FROM users WHERE is_active = TRUE").ToList();
+    }
+
+    private static void EnsureUserExists(NpgsqlConnection conn, NpgsqlTransaction tx, string userId)
+    {
+        Exec(conn, tx,
+            @"INSERT INTO users (id, timezone, is_active, created_at, updated_at)
+              VALUES (@id, 'Asia/Kolkata', TRUE, NOW(), NOW())
+              ON CONFLICT (id) DO UPDATE SET updated_at = NOW()",
+            p => p.AddWithValue("id", userId));
+    }
+
+    private void Persist(string userId, UserData data)
+    {
         using var conn = _dataSource.OpenConnection();
         using var tx = conn.BeginTransaction();
 
@@ -271,6 +500,7 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
             "DELETE FROM integration_settings WHERE user_id = @u",
             "DELETE FROM rule_definitions WHERE user_id = @u",
             "DELETE FROM week_plans WHERE user_id = @u",
+            "DELETE FROM week_confidence_items WHERE user_id = @u",
             "DELETE FROM checklist_imports WHERE user_id = @u",
             "DELETE FROM task_items WHERE user_id = @u",
             "DELETE FROM categories WHERE user_id = @u"
@@ -323,12 +553,12 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
             Exec(conn, tx,
                 @"INSERT INTO task_items
                     (id, user_id, title, description, category_id, sub_category_id, planned_week_start,
-                     assigned_to, priority, status, due_date, start_at, end_at, calendar_event_id,
+                     planned_date, pattern, difficulty, assigned_to, priority, status, due_date, start_at, end_at, calendar_event_id,
                      reminder_at, question_and_reasoning, logic_notes, algorithm_notes, diagram_content,
                      created_at, updated_at, row_version)
                   VALUES
                     (@id, @user, @title, @description, @category, @sub, @week,
-                     @assigned, @priority, @status, @due, @start, @end, @calendar,
+                     @plannedDate, @pattern, @difficulty, @assigned, @priority, @status, @due, @start, @end, @calendar,
                      @reminder, @qr, @logic, @algo, @diagram,
                      @created, @updated, @row)",
                 p =>
@@ -340,6 +570,9 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                     p.AddWithValue("category", (object?)t.CategoryId ?? DBNull.Value);
                     p.AddWithValue("sub", (object?)t.SubCategoryId ?? DBNull.Value);
                     p.AddWithValue("week", t.PlannedWeekStart);
+                    p.AddWithValue("plannedDate", (object?)t.PlannedDate ?? DBNull.Value);
+                    p.AddWithValue("pattern", (object?)t.Pattern ?? DBNull.Value);
+                    p.AddWithValue("difficulty", (object?)t.Difficulty?.ToString() ?? DBNull.Value);
                     p.AddWithValue("assigned", string.IsNullOrWhiteSpace(t.AssignedTo) ? userId : t.AssignedTo);
                     p.AddWithValue("priority", (object?)t.Priority ?? DBNull.Value);
                     p.AddWithValue("status", t.Status.ToString());
@@ -364,8 +597,8 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                 var s = steps[i];
                 var order = i + 1;
                 Exec(conn, tx,
-                    @"INSERT INTO task_sub_steps (id, task_item_id, title, is_done, order_index, completed_at, row_version)
-                      VALUES (@id, @task, @title, @done, @order, @completed, @row)",
+                    @"INSERT INTO task_sub_steps (id, task_item_id, title, is_done, order_index, completed_at, row_version, weight)
+                      VALUES (@id, @task, @title, @done, @order, @completed, @row, @weight)",
                     p =>
                     {
                         p.AddWithValue("id", s.Id);
@@ -375,6 +608,7 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                         p.AddWithValue("order", order);
                         p.AddWithValue("completed", (object?)s.CompletedAt ?? DBNull.Value);
                         p.AddWithValue("row", s.RowVersion < 1 ? 1 : s.RowVersion);
+                        p.AddWithValue("weight", s.Weight);
                     });
             }
 
@@ -470,8 +704,8 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                 var d = drafts[i];
                 var order = d.Order < 1 ? i + 1 : d.Order;
                 Exec(conn, tx,
-                    @"INSERT INTO checklist_draft_items (id, checklist_import_id, order_index, text, week_number, sub_category_name, created_at)
-                      VALUES (@id, @import, @order, @text, @week, @sub, NOW())",
+                    @"INSERT INTO checklist_draft_items (id, checklist_import_id, order_index, text, week_number, sub_category_name, month_label, created_at)
+                      VALUES (@id, @import, @order, @text, @week, @sub, @month, NOW())",
                     p =>
                     {
                         p.AddWithValue("id", d.Id);
@@ -480,8 +714,50 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                         p.AddWithValue("text", d.Text);
                         p.AddWithValue("week", (object?)d.WeekNumber ?? DBNull.Value);
                         p.AddWithValue("sub", (object?)d.SubCategoryName ?? DBNull.Value);
+                        p.AddWithValue("month", (object?)d.MonthLabel ?? DBNull.Value);
                     });
             }
+
+            var confidenceDrafts = im.ConfidenceItems.OrderBy(c => c.Order).ToList();
+            for (var i = 0; i < confidenceDrafts.Count; i++)
+            {
+                var c = confidenceDrafts[i];
+                var order = c.Order < 1 ? i + 1 : c.Order;
+                Exec(conn, tx,
+                    @"INSERT INTO checklist_confidence_items (id, checklist_import_id, order_index, text, week_number, sub_category_name, month_label, created_at)
+                      VALUES (@id, @import, @order, @text, @week, @sub, @month, NOW())",
+                    p =>
+                    {
+                        p.AddWithValue("id", c.Id);
+                        p.AddWithValue("import", im.Id);
+                        p.AddWithValue("order", order);
+                        p.AddWithValue("text", c.Text);
+                        p.AddWithValue("week", (object?)c.WeekNumber ?? DBNull.Value);
+                        p.AddWithValue("sub", (object?)c.SubCategoryName ?? DBNull.Value);
+                        p.AddWithValue("month", (object?)c.MonthLabel ?? DBNull.Value);
+                    });
+            }
+        }
+
+        // Week confidence items.
+        foreach (var c in data.ConfidenceItems.Values)
+        {
+            Exec(conn, tx,
+                @"INSERT INTO week_confidence_items (id, user_id, week_start, sub_category_id, label, text, is_done, order_index, created_at, updated_at)
+                  VALUES (@id, @user, @week, @sub, @label, @text, @done, @order, @created, @updated)",
+                p =>
+                {
+                    p.AddWithValue("id", c.Id);
+                    p.AddWithValue("user", userId);
+                    p.AddWithValue("week", c.WeekStart);
+                    p.AddWithValue("sub", (object?)c.SubCategoryId ?? DBNull.Value);
+                    p.AddWithValue("label", c.Label);
+                    p.AddWithValue("text", c.Text);
+                    p.AddWithValue("done", c.IsDone);
+                    p.AddWithValue("order", c.OrderIndex);
+                    p.AddWithValue("created", c.CreatedAt);
+                    p.AddWithValue("updated", c.UpdatedAt);
+                });
         }
 
         // Week plans.
@@ -613,6 +889,9 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
         public Guid? CategoryId { get; set; }
         public Guid? SubCategoryId { get; set; }
         public DateTime PlannedWeekStart { get; set; }
+        public DateTime? PlannedDate { get; set; }
+        public string? Pattern { get; set; }
+        public string? Difficulty { get; set; }
         public string AssignedTo { get; set; } = "";
         public string? Priority { get; set; }
         public string Status { get; set; } = "";
@@ -639,6 +918,7 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
         public int OrderIndex { get; set; }
         public DateTimeOffset? CompletedAt { get; set; }
         public int RowVersion { get; set; }
+        public int Weight { get; set; }
     }
 
     private sealed class LinkRow
@@ -701,6 +981,32 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
         public string Text { get; set; } = "";
         public int? WeekNumber { get; set; }
         public string? SubCategoryName { get; set; }
+        public string? MonthLabel { get; set; }
+    }
+
+    private sealed class ConfidenceDraftRow
+    {
+        public Guid Id { get; set; }
+        public Guid ChecklistImportId { get; set; }
+        public int OrderIndex { get; set; }
+        public string Text { get; set; } = "";
+        public int? WeekNumber { get; set; }
+        public string? SubCategoryName { get; set; }
+        public string? MonthLabel { get; set; }
+    }
+
+    private sealed class WeekConfidenceRow
+    {
+        public Guid Id { get; set; }
+        public string UserId { get; set; } = "";
+        public DateTime WeekStart { get; set; }
+        public Guid? SubCategoryId { get; set; }
+        public string Label { get; set; } = "";
+        public string Text { get; set; } = "";
+        public bool IsDone { get; set; }
+        public int OrderIndex { get; set; }
+        public DateTimeOffset CreatedAt { get; set; }
+        public DateTimeOffset UpdatedAt { get; set; }
     }
 
     private sealed class WeekPlanRow

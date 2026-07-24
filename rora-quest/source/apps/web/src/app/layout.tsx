@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import UserSwitcher from "./components/user-switcher";
 import "./globals.css";
 
 const navItems = [
   { href: "/", label: "Home" },
-  { href: "/checklist", label: "Checklist Intake" },
   { href: "/categories", label: "Categories" },
-  { href: "/tasks", label: "Tasks by Day" },
+  { href: "/checklist", label: "Checklist Intake" },
+  { href: "/tasks", label: "Tasks by Week" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/scorecard", label: "Scorecard" },
   { href: "/tracking", label: "Streak & Consistency" },
@@ -28,7 +29,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               ))}
             </nav>
           </aside>
-          <main className="content">{children}</main>
+          <div className="main-shell">
+            <header className="top-bar">
+              <UserSwitcher />
+            </header>
+            <main className="content">{children}</main>
+          </div>
         </div>
       </body>
     </html>

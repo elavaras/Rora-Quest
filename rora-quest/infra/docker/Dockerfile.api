@@ -1,0 +1,31 @@
+# Multi-stage build for RoraQuest .NET 8 API
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy nuget config and solution
+COPY source/apps/api/nuget.config ./nuget.config
+COPY source/apps/api/RoraQuest.sln ./RoraQuest.sln
+
+# Copy all project files first (layer-cache friendly)
+COPY source/apps/api/src/ ./src/
+
+# Restore and publish
+WORKDIR /src/src/RoraQuest.Api
+RUN dotnet restore --configfile /src/nuget.config
+RUN dotnet publish -c Release -o /app/publish --no-restore
+
+# Runtime image
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+
+# Non-root user
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+USER appuser
+
+COPY --from=build /app/publish .
+
+ENV ASPNETCORE_URLS=http://+:5000
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+EXPOSE 5000
+ENTRYPOINT ["dotnet", "RoraQuest.Api.dll"]

@@ -1,11 +1,20 @@
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 
 public static class ApiEndpoints
 {
-    public static void MapRoraQuestEndpoints(this WebApplication app)
+    public static void MapRoraQuestEndpoints(this WebApplication app, bool oauthEnabled)
     {
-        var api = app.MapGroup("/api");
+        var auth = app.MapGroup("/api/auth");
+        MapAuth(auth, oauthEnabled);
+
+        var api = oauthEnabled
+            ? app.MapGroup("/api").RequireAuthorization()
+            : app.MapGroup("/api");
 
         MapChecklist(api);
         MapCategories(api);
@@ -15,6 +24,62 @@ public static class ApiEndpoints
         MapNotifications(api);
         MapIntegrationSettings(api);
         MapReports(api);
+    }
+
+    private static void MapAuth(RouteGroupBuilder auth, bool oauthEnabled)
+    {
+        auth.MapGet("/login", (HttpContext http, string? returnUrl) =>
+        {
+            if (!oauthEnabled)
+            {
+                return Results.Problem(
+                    title: "OAuth is not configured.",
+                    detail: "Set EntraAuth__ClientId and EntraAuth__ClientSecret to enable Microsoft sign-in.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var redirect = string.IsNullOrWhiteSpace(returnUrl) ? "/" : returnUrl;
+            var props = new AuthenticationProperties { RedirectUri = redirect };
+            return Results.Challenge(props, [OpenIdConnectDefaults.AuthenticationScheme]);
+        }).AllowAnonymous();
+
+        auth.MapGet("/logout", (string? returnUrl) =>
+        {
+            if (!oauthEnabled)
+            {
+                return Results.NoContent();
+            }
+
+            var redirect = string.IsNullOrWhiteSpace(returnUrl) ? "/" : returnUrl;
+            var props = new AuthenticationProperties { RedirectUri = redirect };
+            return Results.SignOut(
+                props,
+                [CookieAuthenticationDefaults.AuthenticationScheme, OpenIdConnectDefaults.AuthenticationScheme]);
+        }).AllowAnonymous();
+
+        var meEndpoint = auth.MapGet("/me", (HttpContext http) =>
+        {
+            var userId = oauthEnabled ? AuthIdentity.ResolveUserId(http.User) : UserScope.GetUserId(http);
+            if (string.IsNullOrWhiteSpace(userId)) return Results.Unauthorized();
+            var email =
+                http.User.FindFirstValue("preferred_username") ??
+                http.User.FindFirstValue(ClaimTypes.Upn) ??
+                http.User.FindFirstValue(ClaimTypes.Email);
+            var displayName =
+                http.User.FindFirstValue("name") ??
+                http.User.FindFirstValue(ClaimTypes.GivenName) ??
+                http.User.FindFirstValue(ClaimTypes.Name);
+            return Results.Ok(new AuthMeResponse(userId, displayName, email));
+        });
+
+        if (oauthEnabled)
+        {
+            meEndpoint.RequireAuthorization();
+        }
+        else
+        {
+            meEndpoint.AllowAnonymous();
+        }
     }
 
     private static void MapChecklist(RouteGroupBuilder api)
@@ -30,7 +95,7 @@ public static class ApiEndpoints
         group.MapPost("/{importId:guid}/commit", (Guid importId, CommitChecklistImportRequest req, RoraQuestService svc, HttpContext http) =>
         {
             var userId = UserScope.GetUserId(http);
-            var result = svc.CommitChecklistImport(userId, importId, req.SelectedDraftIds);
+            var result = svc.CommitChecklistImport(userId, importId, req.SelectedDraftIds, req.SelectedConfidenceIds, req.StartWeekDate);
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
@@ -94,6 +159,20 @@ public static class ApiEndpoints
             return result.ToResult();
         });
 
+        group.MapDelete("/{taskId:guid}", (Guid taskId, RoraQuestService svc, HttpContext http) =>
+        {
+            var deleted = svc.DeleteTask(UserScope.GetUserId(http), taskId);
+            return deleted ? Results.NoContent() : Results.NotFound();
+        });
+
+        group.MapPost("/bulk-delete", (BulkDeleteTasksRequest req, RoraQuestService svc, HttpContext http) =>
+        {
+            var ids = req.TaskIds ?? [];
+            if (ids.Count == 0) return Results.BadRequest("No task ids provided.");
+            var deleted = svc.DeleteTasks(UserScope.GetUserId(http), ids);
+            return Results.Ok(new { deleted });
+        });
+
         group.MapPatch("/{taskId:guid}/status", (Guid taskId, UpdateTaskStatusRequest req, RoraQuestService svc, HttpContext http) =>
         {
             var result = svc.UpdateTaskStatus(UserScope.GetUserId(http), taskId, req);
@@ -146,6 +225,11 @@ public static class ApiEndpoints
             return result.ToResult();
         });
 
+        group.MapDelete("/{taskId:guid}/assets/{assetId:guid}", (Guid taskId, Guid assetId, RoraQuestService svc, HttpContext http) =>
+        {
+            return svc.DeleteAsset(UserScope.GetUserId(http), taskId, assetId) ? Results.NoContent() : Results.NotFound();
+        });
+
         group.MapPost("/spillover", (SpilloverRequest req, RoraQuestService svc, HttpContext http) =>
         {
             return Results.Ok(svc.MoveSpillover(UserScope.GetUserId(http), req));
@@ -185,6 +269,22 @@ public static class ApiEndpoints
             return Results.Ok(svc.UpsertWeekPlan(UserScope.GetUserId(http), week, req));
         });
 
+        api.MapGet("/week-confidence/{weekStart}", (string weekStart, RoraQuestService svc, HttpContext http) =>
+        {
+            if (!DateOnly.TryParse(weekStart, out var week))
+            {
+                return Results.BadRequest("Invalid weekStart date.");
+            }
+
+            return Results.Ok(svc.GetWeekConfidence(UserScope.GetUserId(http), week));
+        });
+
+        api.MapPatch("/week-confidence/{itemId:guid}", (Guid itemId, ToggleWeekConfidenceRequest req, RoraQuestService svc, HttpContext http) =>
+        {
+            var result = svc.ToggleWeekConfidence(UserScope.GetUserId(http), itemId, req.IsDone);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        });
+
         var rules = api.MapGroup("/rules");
         rules.MapGet("", (RoraQuestService svc, HttpContext http) => Results.Ok(svc.GetRules(UserScope.GetUserId(http))));
         rules.MapPost("", (CreateRuleRequest req, RoraQuestService svc, HttpContext http) => Results.Ok(svc.CreateRule(UserScope.GetUserId(http), req)));
@@ -218,7 +318,23 @@ public static class ApiEndpoints
         var group = api.MapGroup("/notifications");
         group.MapGet("/settings", (RoraQuestService svc, HttpContext http) => Results.Ok(svc.GetNotificationSettings(UserScope.GetUserId(http))));
         group.MapPut("/settings", (UpdateNotificationSettingsRequest req, RoraQuestService svc, HttpContext http) => Results.Ok(svc.UpdateNotificationSettings(UserScope.GetUserId(http), req)));
-        group.MapPost("/daily-digest/trigger", (RoraQuestService svc, HttpContext http) => Results.Ok(svc.TriggerDailyDigest(UserScope.GetUserId(http))));
+        group.MapGet("/daily-digest/payload", (HttpContext http, RoraQuestService svc) =>
+        {
+            var dateQuery = http.Request.Query["date"].FirstOrDefault();
+            DateOnly? onDate = null;
+            if (!string.IsNullOrWhiteSpace(dateQuery))
+            {
+                if (!DateOnly.TryParse(dateQuery, out var parsed))
+                {
+                    return Results.BadRequest("Invalid date. Use yyyy-MM-dd.");
+                }
+                onDate = parsed;
+            }
+
+            return Results.Ok(svc.GetDailyDigestPayload(UserScope.GetUserId(http), onDate));
+        });
+        group.MapPost("/daily-digest/trigger", async (DailyDigestDispatcher dispatcher, HttpContext http, CancellationToken ct) =>
+            Results.Ok(await dispatcher.SendForUserAsync(UserScope.GetUserId(http), null, true, ct)));
         group.MapGet("/schedules", (RoraQuestService svc, HttpContext http) => Results.Ok(svc.GetNotificationSchedules(UserScope.GetUserId(http))));
     }
 
@@ -268,7 +384,12 @@ public static class ApiEndpoints
 
 public static class UserScope
 {
-    public static string GetUserId(HttpContext ctx) => ctx.Request.Headers["X-User-Id"].FirstOrDefault() ?? "demo-user";
+    public static string GetUserId(HttpContext ctx)
+    {
+        return AuthIdentity.ResolveUserId(ctx.User)
+            ?? ctx.Request.Headers["X-User-Id"].FirstOrDefault()
+            ?? "demo-user";
+    }
 }
 
 public enum TaskStatus
@@ -294,6 +415,13 @@ public enum RuleSeverity
     AutoFix
 }
 
+public enum Difficulty
+{
+    Easy,
+    Medium,
+    Hard
+}
+
 public sealed class AppState
 {
     public object Gate { get; } = new();
@@ -305,6 +433,7 @@ public sealed class UserData
     public Dictionary<Guid, Category> Categories { get; } = new();
     public Dictionary<Guid, TaskItem> Tasks { get; } = new();
     public Dictionary<Guid, ChecklistImport> Imports { get; } = new();
+    public Dictionary<Guid, WeekConfidenceItem> ConfidenceItems { get; } = new();
     public Dictionary<DateOnly, WeekPlan> WeekPlans { get; } = new();
     public Dictionary<Guid, RuleDefinition> Rules { get; } = new();
     public Dictionary<string, IntegrationSetting> Integrations { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -320,15 +449,27 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         @"^Week\s+(?<week>\d+)\s*:\s*(?<subcategory>.+)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex MonthHeadingRegex = new(
+        @"^Month\s+\d+\s*:\s*.+$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ConfidenceHeadingRegex = new(
+        @"^Pattern\s+confidence\s*:?\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     public ChecklistImport CreateChecklistImport(string userId, BulkChecklistImportRequest req)
     {
         lock (_gate)
         {
             var user = GetUser(userId);
             var draftItems = new List<ChecklistDraftItem>();
+            var confidenceItems = new List<ConfidenceDraftItem>();
             int? weekNumber = null;
             string? subCategory = null;
+            string? monthLabel = null;
+            var inConfidence = false;
             var order = 1;
+            var confOrder = 1;
 
             foreach (var rawLine in req.RawText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
@@ -338,11 +479,27 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                     continue;
                 }
 
+                // Month headings are visual-only: recognized, tracked for preview grouping, but not turned into tasks.
+                if (MonthHeadingRegex.IsMatch(line))
+                {
+                    monthLabel = line;
+                    inConfidence = false;
+                    continue;
+                }
+
                 var heading = WeekHeadingRegex.Match(line);
                 if (heading.Success)
                 {
                     weekNumber = int.Parse(heading.Groups["week"].Value, CultureInfo.InvariantCulture);
                     subCategory = heading.Groups["subcategory"].Value.Trim();
+                    inConfidence = false;
+                    continue;
+                }
+
+                // "Pattern confidence:" starts a self-assessment block for the current week.
+                if (ConfidenceHeadingRegex.IsMatch(line))
+                {
+                    inConfidence = true;
                     continue;
                 }
 
@@ -352,7 +509,14 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                     continue;
                 }
 
-                draftItems.Add(new ChecklistDraftItem(Guid.NewGuid(), order++, normalizedText, weekNumber, subCategory));
+                if (inConfidence)
+                {
+                    confidenceItems.Add(new ConfidenceDraftItem(Guid.NewGuid(), confOrder++, normalizedText, weekNumber, subCategory, monthLabel));
+                }
+                else
+                {
+                    draftItems.Add(new ChecklistDraftItem(Guid.NewGuid(), order++, normalizedText, weekNumber, subCategory, monthLabel));
+                }
             }
 
             var import = new ChecklistImport
@@ -365,7 +529,8 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 DaysPerWeek = req.DaysPerWeek ?? [],
                 ParsedCount = draftItems.Count,
                 CreatedAt = DateTimeOffset.UtcNow,
-                DraftItems = draftItems
+                DraftItems = draftItems,
+                ConfidenceItems = confidenceItems
             };
             user.Imports[import.Id] = import;
             store.Save(userId, user);
@@ -373,7 +538,7 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         }
     }
 
-    public object? CommitChecklistImport(string userId, Guid importId, List<Guid>? selectedDraftIds)
+    public object? CommitChecklistImport(string userId, Guid importId, List<Guid>? selectedDraftIds, List<Guid>? selectedConfidenceIds, DateOnly? startWeekDate = null)
     {
         lock (_gate)
         {
@@ -383,15 +548,50 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 return null;
             }
 
+            var now = DateTimeOffset.UtcNow;
             var selected = import.DraftItems
                 .Where(d => selectedDraftIds is null || selectedDraftIds.Count == 0 || selectedDraftIds.Contains(d.Id))
+                .OrderBy(d => d.WeekNumber ?? int.MaxValue)
+                .ThenBy(d => d.Order)
                 .ToList();
 
+            var baselineWeek = StartOfWeek(
+                startWeekDate ?? DateOnly.FromDateTime(DateTime.UtcNow.Date),
+                DayOfWeek.Monday);
+
             var categoryId = EnsureCategory(user, userId, import.CategoryName, null)?.Id;
+            // Cap each calendar week at 3 problems (one per Mon/Wed/Fri slot). When a parsed
+            // week yields more than 3 problems, the overflow cascades forward into the next
+            // week(s) that still have a free slot, never landing earlier than the problem's
+            // own target week.
+            var weekFill = new Dictionary<DateOnly, int>();
+            // Seed the per-week fill from tasks already scheduled so re-committing an import
+            // (or importing into weeks that already hold tasks) cascades past filled weeks
+            // instead of stacking duplicates on the same day.
+            foreach (var existing in user.Tasks.Values)
+            {
+                if (existing.PlannedDate is null) continue;
+                var wk = existing.PlannedWeekStart;
+                weekFill[wk] = (weekFill.TryGetValue(wk, out var c) ? c : 0) + 1;
+            }
+            // Guard against re-import: skip any problem whose title already exists in this
+            // category so committing the same checklist twice does not duplicate tasks.
+            var existingTitles = new HashSet<string>(
+                user.Tasks.Values.Where(t => t.CategoryId == categoryId).Select(t => t.Title),
+                StringComparer.OrdinalIgnoreCase);
             var created = new List<TaskItem>();
             foreach (var item in selected)
             {
+                if (!existingTitles.Add(item.Text))
+                {
+                    continue;
+                }
                 var subCategoryId = EnsureCategory(user, userId, item.SubCategoryName, categoryId)?.Id;
+                var targetWeek = ResolveWeekStart(item.WeekNumber, baselineWeek);
+                var weekStart = NextWeekWithFreeSlot(targetWeek, weekFill);
+                var slot = weekFill.TryGetValue(weekStart, out var f) ? f : 0;
+                weekFill[weekStart] = slot + 1;
+                var plannedDate = weekStart.AddDays(ScheduleDayOffsets[slot]);
                 var task = new TaskItem
                 {
                     Id = Guid.NewGuid(),
@@ -400,17 +600,157 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                     CategoryId = categoryId,
                     SubCategoryId = subCategoryId,
                     Status = TaskStatus.Todo,
-                    PlannedWeekStart = ResolveWeekStart(item.WeekNumber),
+                    PlannedWeekStart = weekStart,
+                    PlannedDate = plannedDate,
                     AssignedTo = userId,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    UpdatedAt = DateTimeOffset.UtcNow
+                    CreatedAt = now,
+                    UpdatedAt = now
                 };
+                SeedStandardSubSteps(task);
                 user.Tasks[task.Id] = task;
                 created.Add(task);
             }
 
+            var selectedConfidence = import.ConfidenceItems
+                .Where(c => selectedConfidenceIds is null || selectedConfidenceIds.Count == 0 || selectedConfidenceIds.Contains(c.Id))
+                .ToList();
+
+            var createdConfidence = new List<WeekConfidenceItem>();
+            var orderByWeek = new Dictionary<DateOnly, int>();
+            // Guard against re-import: skip confidence items identical to ones already stored
+            // (same week + label + text) so repeated commits do not duplicate the checklist.
+            var existingConfidenceKeys = new HashSet<string>(
+                user.ConfidenceItems.Values.Select(c => ConfidenceKey(c.WeekStart, c.Label, c.Text)),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var c in selectedConfidence)
+            {
+                var weekStart = ResolveWeekStart(c.WeekNumber, baselineWeek);
+                var label = c.SubCategoryName ?? "";
+                if (!existingConfidenceKeys.Add(ConfidenceKey(weekStart, label, c.Text)))
+                {
+                    continue;
+                }
+                // Link to the real sub-category entity (name kept as denormalized fallback).
+                var confSubCategoryId = EnsureCategory(user, userId, c.SubCategoryName, categoryId)?.Id;
+                var idx = orderByWeek.TryGetValue(weekStart, out var n) ? n : 1;
+                orderByWeek[weekStart] = idx + 1;
+                var confidence = new WeekConfidenceItem
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    WeekStart = weekStart,
+                    SubCategoryId = confSubCategoryId,
+                    Label = label,
+                    Text = c.Text,
+                    IsDone = false,
+                    OrderIndex = idx,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+                user.ConfidenceItems[confidence.Id] = confidence;
+                createdConfidence.Add(confidence);
+            }
+
             store.Save(userId, user);
-            return new { importId, createdCount = created.Count, tasks = created };
+            return new
+            {
+                importId,
+                createdCount = created.Count,
+                confidenceCount = createdConfidence.Count,
+                tasks = created,
+                confidenceItems = createdConfidence
+            };
+        }
+    }
+
+    private static string ConfidenceKey(DateOnly weekStart, string? label, string text) =>
+        $"{weekStart:yyyy-MM-dd}\u0001{label ?? ""}\u0001{text}";
+
+    public List<WeekConfidenceItem> GetWeekConfidence(string userId, DateOnly weekStart)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            var items = user.ConfidenceItems.Values
+                .Where(c => c.WeekStart == weekStart)
+                .OrderBy(c => c.Label)
+                .ThenBy(c => c.OrderIndex)
+                .ToList();
+
+            // Resolve the display label from the linked sub-category's CURRENT name so the
+            // confidence checklist survives sub-category renames. The stored `Label` is kept as
+            // a denormalized fallback (used when the FK is null or the category was deleted), and
+            // is refreshed here to the latest name so future reads/dedup stay consistent.
+            var relabelled = false;
+            foreach (var c in items)
+            {
+                if (c.SubCategoryId is Guid subId
+                    && user.Categories.TryGetValue(subId, out var cat)
+                    && !string.IsNullOrWhiteSpace(cat.Name)
+                    && !string.Equals(c.Label, cat.Name, StringComparison.Ordinal))
+                {
+                    c.Label = cat.Name;
+                    c.UpdatedAt = DateTimeOffset.UtcNow;
+                    relabelled = true;
+                }
+            }
+
+            // Self-heal duplicates accumulated from repeated imports: collapse items with the
+            // same label + text within the week, keep the first, OR-in the done state, and
+            // physically drop the extras so the count stays correct going forward.
+            var kept = new Dictionary<string, WeekConfidenceItem>(StringComparer.OrdinalIgnoreCase);
+            var duplicateIds = new List<Guid>();
+            foreach (var c in items)
+            {
+                var key = $"{c.Label}\u0001{c.Text}";
+                if (kept.TryGetValue(key, out var keep))
+                {
+                    if (c.IsDone && !keep.IsDone)
+                    {
+                        keep.IsDone = true;
+                    }
+                    duplicateIds.Add(c.Id);
+                }
+                else
+                {
+                    kept[key] = c;
+                }
+            }
+
+            if (duplicateIds.Count > 0)
+            {
+                foreach (var id in duplicateIds)
+                {
+                    user.ConfidenceItems.Remove(id);
+                }
+            }
+
+            if (relabelled || duplicateIds.Count > 0)
+            {
+                store.Save(userId, user);
+            }
+
+            return kept.Values
+                .OrderBy(c => c.Label)
+                .ThenBy(c => c.OrderIndex)
+                .ToList();
+        }
+    }
+
+    public WeekConfidenceItem? ToggleWeekConfidence(string userId, Guid itemId, bool isDone)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            if (!user.ConfidenceItems.TryGetValue(itemId, out var item))
+            {
+                return null;
+            }
+
+            item.IsDone = isDone;
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+            store.Save(userId, user);
+            return item;
         }
     }
 
@@ -496,15 +836,62 @@ public sealed class RoraQuestService(IRoraQuestStore store)
     {
         lock (_gate)
         {
-            var tasks = GetUser(userId).Tasks.Values.AsEnumerable();
+            var user = GetUser(userId);
+            HealDuplicateTasks(user, userId);
+            var tasks = user.Tasks.Values.AsEnumerable();
             if (query.CategoryId is not null) tasks = tasks.Where(x => x.CategoryId == query.CategoryId);
             if (query.SubCategoryId is not null) tasks = tasks.Where(x => x.SubCategoryId == query.SubCategoryId);
             if (query.Status is not null) tasks = tasks.Where(x => x.Status == query.Status);
-            if (query.WeekStart is not null) tasks = tasks.Where(x => x.PlannedWeekStart == query.WeekStart);
+            if (query.WeekStart is not null)
+            {
+                var weekStart = query.WeekStart.Value;
+                var weekEnd = weekStart.AddDays(6);
+                tasks = tasks.Where(x =>
+                    x.PlannedWeekStart == weekStart
+                    || (x.PlannedDate is not null && x.PlannedDate.Value >= weekStart && x.PlannedDate.Value <= weekEnd));
+            }
             if (query.From is not null) tasks = tasks.Where(x => x.StartAt?.Date >= query.From.Value.ToDateTime(TimeOnly.MinValue));
             if (query.To is not null) tasks = tasks.Where(x => x.EndAt?.Date <= query.To.Value.ToDateTime(TimeOnly.MaxValue));
-            return tasks.OrderByDescending(x => x.UpdatedAt).ToList();
+            return tasks
+                .OrderBy(x => x.PlannedWeekStart)
+                .ThenBy(x => x.PlannedDate ?? DateOnly.MaxValue)
+                .ThenBy(x => x.CreatedAt)
+                .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
+    }
+
+    // Self-heal exact re-import duplicates: tasks sharing the same category, sub-category,
+    // title AND planned date are artifacts of committing the same checklist more than once.
+    // Keep the most-progressed copy (most completed sub-step weight, then earliest created)
+    // and physically remove the rest so the week view stops showing duplicates.
+    private void HealDuplicateTasks(UserData user, string userId)
+    {
+        var groups = user.Tasks.Values
+            .Where(t => t.PlannedDate is not null)
+            .GroupBy(t => $"{t.CategoryId}\u0001{t.SubCategoryId}\u0001{t.Title}\u0001{t.PlannedDate:yyyy-MM-dd}",
+                StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .ToList();
+
+        if (groups.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var group in groups)
+        {
+            var keep = group
+                .OrderByDescending(t => t.SubSteps.Where(s => s.IsDone).Sum(s => s.Weight))
+                .ThenBy(t => t.CreatedAt)
+                .First();
+            foreach (var dup in group.Where(t => t.Id != keep.Id))
+            {
+                user.Tasks.Remove(dup.Id);
+            }
+        }
+
+        store.Save(userId, user);
     }
 
     public TaskItem CreateTask(string userId, CreateTaskRequest req)
@@ -520,25 +907,81 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 Description = req.Description,
                 CategoryId = req.CategoryId,
                 SubCategoryId = req.SubCategoryId,
-                PlannedWeekStart = req.PlannedWeekStart ?? DateOnly.FromDateTime(DateTime.UtcNow.Date),
+                PlannedWeekStart = req.PlannedWeekStart
+                    ?? (req.PlannedDate is { } pd
+                        ? StartOfWeek(pd, DayOfWeek.Monday)
+                        : StartOfWeek(DateOnly.FromDateTime(DateTime.UtcNow.Date), DayOfWeek.Monday)),
+                PlannedDate = req.PlannedDate,
                 Status = req.Status ?? TaskStatus.Todo,
                 StartAt = req.StartAt,
                 EndAt = req.EndAt,
                 DueDate = req.DueDate,
                 Priority = req.Priority,
                 AssignedTo = req.AssignedTo ?? userId,
+                Pattern = req.Pattern,
+                Difficulty = req.Difficulty,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
+            SeedStandardSubSteps(task);
             user.Tasks[task.Id] = task;
             store.Save(userId, user);
             return task;
         }
     }
 
+    public static readonly (string Title, int Weight)[] StandardSubStepTemplate =
+    [
+        ("Understand Problem", 5),
+        ("Corner Cases", 10),
+        ("Brute Force", 10),
+        ("Optimized Solution", 25),
+        ("Time Complexity", 10),
+        ("Space Complexity", 10),
+        ("Coding", 20),
+        ("Testing", 5),
+        ("Revision", 5)
+    ];
+
+    private static void SeedStandardSubSteps(TaskItem task)
+    {
+        if (task.SubSteps.Count > 0) return;
+        var order = 1;
+        foreach (var (title, weight) in StandardSubStepTemplate)
+        {
+            task.SubSteps.Add(new TaskSubStep(Guid.NewGuid(), title, false, order++, null, 1, weight));
+        }
+    }
+
     public TaskItem? GetTask(string userId, Guid taskId)
     {
         lock (_gate) return GetUser(userId).Tasks.GetValueOrDefault(taskId);
+    }
+
+    public bool DeleteTask(string userId, Guid taskId)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            if (!user.Tasks.Remove(taskId)) return false;
+            store.DeleteTasks(userId, new[] { taskId });
+            return true;
+        }
+    }
+
+    public int DeleteTasks(string userId, IReadOnlyCollection<Guid> taskIds)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            var removedIds = new List<Guid>(taskIds.Count);
+            foreach (var id in taskIds)
+            {
+                if (user.Tasks.Remove(id)) removedIds.Add(id);
+            }
+            if (removedIds.Count > 0) store.DeleteTasks(userId, removedIds);
+            return removedIds.Count;
+        }
     }
 
     public ServiceResult<TaskItem> UpdateTask(string userId, Guid taskId, UpdateTaskRequest req)
@@ -554,10 +997,22 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             if (req.CategoryId is not null) task.CategoryId = req.CategoryId;
             task.SubCategoryId = req.SubCategoryId;
             if (req.PlannedWeekStart is not null) task.PlannedWeekStart = req.PlannedWeekStart.Value;
+            if (req.PlannedDate is not null)
+            {
+                task.PlannedDate = req.PlannedDate;
+                if (req.PlannedWeekStart is null)
+                    task.PlannedWeekStart = StartOfWeek(req.PlannedDate.Value, DayOfWeek.Monday);
+            }
             if (req.StartAt is not null) task.StartAt = req.StartAt;
             if (req.EndAt is not null) task.EndAt = req.EndAt;
             if (req.DueDate is not null) task.DueDate = req.DueDate;
             if (req.Priority is not null) task.Priority = req.Priority;
+            if (req.Pattern is not null) task.Pattern = req.Pattern;
+            if (req.Difficulty is not null) task.Difficulty = req.Difficulty;
+            if (req.QuestionAndReasoning is not null) task.QuestionAndReasoning = req.QuestionAndReasoning;
+            if (req.LogicNotes is not null) task.LogicNotes = req.LogicNotes;
+            if (req.AlgorithmNotes is not null) task.AlgorithmNotes = req.AlgorithmNotes;
+            if (req.DiagramContent is not null) task.DiagramContent = req.DiagramContent;
             task.UpdatedAt = DateTimeOffset.UtcNow;
             task.RowVersion++;
             store.Save(userId, user);
@@ -604,7 +1059,7 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskSubStep>.NotFound();
             var nextOrder = task.SubSteps.Count == 0 ? 1 : task.SubSteps.Max(s => s.OrderIndex) + 1;
-            var step = new TaskSubStep(Guid.NewGuid(), req.Title.Trim(), false, nextOrder, null, 1);
+            var step = new TaskSubStep(Guid.NewGuid(), req.Title.Trim(), false, nextOrder, null, 1, req.Weight);
             task.SubSteps.Add(step);
             task.RowVersion++;
             store.Save(userId, user);
@@ -712,6 +1167,23 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         }
     }
 
+    public bool DeleteAsset(string userId, Guid taskId, Guid assetId)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            if (!user.Tasks.TryGetValue(taskId, out var task)) return false;
+            var removed = task.Assets.RemoveAll(x => x.Id == assetId) > 0;
+            if (removed)
+            {
+                task.RowVersion++;
+                task.UpdatedAt = DateTimeOffset.UtcNow;
+                store.Save(userId, user);
+            }
+            return removed;
+        }
+    }
+
     public object MoveSpillover(string userId, SpilloverRequest req)
     {
         lock (_gate)
@@ -722,7 +1194,12 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             {
                 if (!user.Tasks.TryGetValue(taskId, out var task)) continue;
                 var from = task.PlannedWeekStart;
+                var dayOffset = task.PlannedDate is null
+                    ? 0
+                    : (int)(task.PlannedDate.Value.DayNumber - task.PlannedWeekStart.DayNumber);
+                dayOffset = Math.Clamp(dayOffset, 0, 6);
                 task.PlannedWeekStart = req.ToWeekStart;
+                task.PlannedDate = req.ToWeekStart.AddDays(dayOffset);
                 task.UpdatedAt = DateTimeOffset.UtcNow;
                 task.RowVersion++;
                 var ev = new TaskSpilloverEvent(Guid.NewGuid(), from, req.ToWeekStart, req.Reason, DateTimeOffset.UtcNow);
@@ -914,7 +1391,7 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 EveningReminderTime = req.EveningReminderTime ?? user.NotificationSettings.EveningReminderTime,
                 TeamsDestination = req.TeamsDestination ?? user.NotificationSettings.TeamsDestination
             };
-            store.Save(userId, user);
+            store.SaveNotificationSettings(userId, user.NotificationSettings);
             return user.NotificationSettings;
         }
     }
@@ -926,7 +1403,7 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             var user = GetUser(userId);
             var schedule = new NotificationSchedule(Guid.NewGuid(), null, "Teams", DateTimeOffset.UtcNow, "Triggered", DateTimeOffset.UtcNow);
             user.NotificationSchedules.Add(schedule);
-            store.Save(userId, user);
+            store.AddNotificationSchedule(userId, schedule);
             return schedule;
         }
     }
@@ -934,6 +1411,79 @@ public sealed class RoraQuestService(IRoraQuestStore store)
     public List<NotificationSchedule> GetNotificationSchedules(string userId)
     {
         lock (_gate) return GetUser(userId).NotificationSchedules.OrderByDescending(x => x.ScheduledAt).ToList();
+    }
+
+    public IReadOnlyCollection<string> GetKnownUserIds()
+    {
+        lock (_gate) return store.GetKnownUserIds();
+    }
+
+    public bool IsTeamsConnected(string userId)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            var key = user.Integrations.Keys.FirstOrDefault(k => string.Equals(k, "Teams", StringComparison.OrdinalIgnoreCase));
+            return key is not null && user.Integrations.TryGetValue(key, out var setting) && setting.IsConnected;
+        }
+    }
+
+    public DailyDigestPayload GetDailyDigestPayload(string userId, DateOnly? onDate)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            var date = onDate ?? DateOnly.FromDateTime(DateTime.Now);
+            var tasks = user.Tasks.Values
+                .Where(t => t.PlannedDate == date && t.Status is not TaskStatus.Done and not TaskStatus.Cancelled and not TaskStatus.Skipped)
+                .OrderBy(t => t.StartAt ?? DateTimeOffset.MaxValue)
+                .ThenBy(t => GetPriorityRank(t.Priority))
+                .ThenBy(t => t.Title, StringComparer.OrdinalIgnoreCase)
+                .Select(t => new DailyDigestTaskItem(
+                    t.Id,
+                    t.Title,
+                    t.Status,
+                    t.Priority,
+                    t.PlannedDate,
+                    t.StartAt,
+                    t.DueDate))
+                .ToList();
+
+            var destination = string.IsNullOrWhiteSpace(user.NotificationSettings.TeamsDestination)
+                ? "personal-chat"
+                : user.NotificationSettings.TeamsDestination.Trim();
+            var text = BuildDailyDigestMessage(date, tasks);
+            return new DailyDigestPayload(userId, date, destination, tasks.Count, tasks, text);
+        }
+    }
+
+    public bool HasDailyDigestAttemptForDate(string userId, DateOnly localDate, TimeZoneInfo timeZone)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            return user.NotificationSchedules.Any(s =>
+                string.Equals(s.Channel, DailyDigestChannel, StringComparison.OrdinalIgnoreCase)
+                && DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(s.ScheduledAt, timeZone).DateTime) == localDate);
+        }
+    }
+
+    public NotificationSchedule RecordDailyDigestAttempt(string userId, string status, DateTimeOffset? sentAt)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            var schedule = new NotificationSchedule(
+                Guid.NewGuid(),
+                null,
+                DailyDigestChannel,
+                DateTimeOffset.UtcNow,
+                status,
+                sentAt);
+            user.NotificationSchedules.Add(schedule);
+            store.AddNotificationSchedule(userId, schedule);
+            return schedule;
+        }
     }
 
     public List<IntegrationSetting> GetIntegrations(string userId)
@@ -959,7 +1509,7 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 LastSyncAt = DateTimeOffset.UtcNow
             };
             user.Integrations[item.Provider] = item;
-            store.Save(userId, user);
+            store.UpsertIntegration(userId, item);
             return item;
         }
     }
@@ -974,13 +1524,18 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         lock (_gate)
         {
             var user = GetUser(userId);
-            if (!user.Integrations.TryGetValue(provider, out var setting))
+            var integrationKey = user.Integrations.Keys.FirstOrDefault(k =>
+                string.Equals(k, provider, StringComparison.OrdinalIgnoreCase));
+            if (integrationKey is null || !user.Integrations.TryGetValue(integrationKey, out var setting))
             {
                 return new { disconnected = false, reason = "not_found" };
             }
 
             setting.IsConnected = false;
-            store.Save(userId, user);
+            if (!store.DisconnectIntegration(userId, provider))
+            {
+                store.UpsertIntegration(userId, setting);
+            }
             return new { disconnected = true, provider };
         }
     }
@@ -990,7 +1545,11 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         lock (_gate)
         {
             var user = GetUser(userId);
-            var ok = user.Integrations.TryGetValue(provider, out var setting) && setting.IsConnected;
+            var integrationKey = user.Integrations.Keys.FirstOrDefault(k =>
+                string.Equals(k, provider, StringComparison.OrdinalIgnoreCase));
+            var ok = integrationKey is not null
+                && user.Integrations.TryGetValue(integrationKey, out var setting)
+                && setting.IsConnected;
             return new { provider, ok };
         }
     }
@@ -1094,6 +1653,8 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         }
     }
 
+    private const string DailyDigestChannel = "TeamsDailyDigest";
+
     private static IEnumerable<TaskItem> FilterByWindow(IEnumerable<TaskItem> tasks, ReportWindow window)
     {
         if (window.From is null && window.To is null) return tasks;
@@ -1110,6 +1671,12 @@ public sealed class RoraQuestService(IRoraQuestStore store)
     {
         if (task.SubSteps.Count > 0)
         {
+            var totalWeight = task.SubSteps.Sum(s => s.Weight);
+            if (totalWeight > 0)
+            {
+                var doneWeight = task.SubSteps.Where(s => s.IsDone).Sum(s => s.Weight);
+                return Math.Round((double)doneWeight / totalWeight * 100, 2);
+            }
             return Math.Round((double)task.SubSteps.Count(s => s.IsDone) / task.SubSteps.Count * 100, 2);
         }
         return task.Status switch
@@ -1123,22 +1690,72 @@ public sealed class RoraQuestService(IRoraQuestStore store)
 
     private UserData GetUser(string userId) => store.Load(userId);
 
+    private static int GetPriorityRank(string? priority)
+    {
+        return priority?.Trim().ToLowerInvariant() switch
+        {
+            "p0" or "critical" or "high" => 0,
+            "p1" or "medium" => 1,
+            "p2" or "low" => 2,
+            _ => 3
+        };
+    }
+
+    private static string BuildDailyDigestMessage(DateOnly date, IReadOnlyCollection<DailyDigestTaskItem> tasks)
+    {
+        var heading = $"Good morning! Here is your plan for {date:yyyy-MM-dd}:";
+        if (tasks.Count == 0)
+        {
+            return $"{heading}{Environment.NewLine}- No planned tasks for today.";
+        }
+
+        var lines = tasks.Select((task, index) =>
+        {
+            var parts = new List<string> { $"{index + 1}. {task.Title}" };
+            if (!string.IsNullOrWhiteSpace(task.Priority)) parts.Add($"Priority: {task.Priority}");
+            if (task.StartAt is not null) parts.Add($"Start: {task.StartAt:HH:mm}");
+            if (task.DueDate is not null) parts.Add($"Due: {task.DueDate:yyyy-MM-dd}");
+            return $"{string.Join(" | ", parts)}";
+        });
+        return $"{heading}{Environment.NewLine}{string.Join(Environment.NewLine, lines)}";
+    }
+
     private static string NormalizeChecklistLine(string line)
     {
         var normalized = Regex.Replace(line, @"^[-*]\s+", "");
+        // Strip leading checkbox markers: [ ], [x], [X], and ballot-box glyphs ☐ ☑ ☒.
+        normalized = Regex.Replace(normalized, @"^\[\s*[xX]?\s*\]\s*", "");
+        normalized = Regex.Replace(normalized, @"^[\u2610\u2611\u2612]\s*", "");
         normalized = Regex.Replace(normalized, @"^\d+[\)\.\-\s]+", "");
         return normalized.Trim();
     }
 
-    private static DateOnly ResolveWeekStart(int? weekNumber)
+    private static readonly int[] ScheduleDayOffsets = [0, 2, 4]; // Monday, Wednesday, Friday
+
+    private static DateOnly ResolveWeekStart(int? weekNumber, DateOnly baselineWeek)
     {
-        var baselineWeek = StartOfWeek(DateOnly.FromDateTime(DateTime.UtcNow.Date), DayOfWeek.Monday);
         if (weekNumber is > 1)
         {
             return baselineWeek.AddDays((weekNumber.Value - 1) * 7);
         }
 
         return baselineWeek;
+    }
+
+    /// <summary>
+    /// Returns the first calendar week at or after <paramref name="targetWeek"/> whose
+    /// Mon/Wed/Fri slots are not yet full (fewer than <see cref="ScheduleDayOffsets"/> tasks),
+    /// so overflow beyond 3-per-week cascades into subsequent weeks.
+    /// </summary>
+    private static DateOnly NextWeekWithFreeSlot(DateOnly targetWeek, Dictionary<DateOnly, int> weekFill)
+    {
+        var week = targetWeek;
+        while ((weekFill.TryGetValue(week, out var count) ? count : 0) >= ScheduleDayOffsets.Length)
+        {
+            week = week.AddDays(7);
+        }
+
+        return week;
     }
 
     private static DateOnly StartOfWeek(DateOnly value, DayOfWeek startOfWeek)
@@ -1215,6 +1832,9 @@ public sealed class TaskItem
     public Guid? CategoryId { get; set; }
     public Guid? SubCategoryId { get; set; }
     public DateOnly PlannedWeekStart { get; set; }
+    public DateOnly? PlannedDate { get; set; }
+    public string? Pattern { get; set; }
+    public Difficulty? Difficulty { get; set; }
     public string AssignedTo { get; set; } = "";
     public string? Priority { get; set; }
     public TaskStatus Status { get; set; }
@@ -1237,7 +1857,7 @@ public sealed class TaskItem
     public List<TaskSpilloverEvent> Spillovers { get; } = [];
 }
 
-public sealed class TaskSubStep(Guid id, string title, bool isDone, int orderIndex, DateTimeOffset? completedAt, int rowVersion)
+public sealed class TaskSubStep(Guid id, string title, bool isDone, int orderIndex, DateTimeOffset? completedAt, int rowVersion, int weight = 0)
 {
     public Guid Id { get; set; } = id;
     public string Title { get; set; } = title;
@@ -1245,6 +1865,7 @@ public sealed class TaskSubStep(Guid id, string title, bool isDone, int orderInd
     public int OrderIndex { get; set; } = orderIndex;
     public DateTimeOffset? CompletedAt { get; set; } = completedAt;
     public int RowVersion { get; set; } = rowVersion;
+    public int Weight { get; set; } = weight;
 }
 
 public sealed class TaskLink(Guid id, string url, string? label, string? sourceType)
@@ -1294,15 +1915,41 @@ public sealed class ChecklistImport
     public int ParsedCount { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public List<ChecklistDraftItem> DraftItems { get; set; } = [];
+    public List<ConfidenceDraftItem> ConfidenceItems { get; set; } = [];
 }
 
-public sealed class ChecklistDraftItem(Guid id, int order, string text, int? weekNumber, string? subCategoryName)
+public sealed class ChecklistDraftItem(Guid id, int order, string text, int? weekNumber, string? subCategoryName, string? monthLabel = null)
 {
     public Guid Id { get; set; } = id;
     public int Order { get; set; } = order;
     public string Text { get; set; } = text;
     public int? WeekNumber { get; set; } = weekNumber;
     public string? SubCategoryName { get; set; } = subCategoryName;
+    public string? MonthLabel { get; set; } = monthLabel;
+}
+
+public sealed class ConfidenceDraftItem(Guid id, int order, string text, int? weekNumber, string? subCategoryName, string? monthLabel = null)
+{
+    public Guid Id { get; set; } = id;
+    public int Order { get; set; } = order;
+    public string Text { get; set; } = text;
+    public int? WeekNumber { get; set; } = weekNumber;
+    public string? SubCategoryName { get; set; } = subCategoryName;
+    public string? MonthLabel { get; set; } = monthLabel;
+}
+
+public sealed class WeekConfidenceItem
+{
+    public Guid Id { get; set; }
+    public string UserId { get; set; } = "";
+    public DateOnly WeekStart { get; set; }
+    public Guid? SubCategoryId { get; set; }
+    public string Label { get; set; } = "";
+    public string Text { get; set; } = "";
+    public bool IsDone { get; set; }
+    public int OrderIndex { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed class WeekPlan(DateOnly weekStartDate, WorkloadMode workloadMode, string? notes, DateTimeOffset createdAt, DateTimeOffset updatedAt)
@@ -1342,6 +1989,31 @@ public sealed class NotificationSchedule(Guid id, Guid? taskId, string channel, 
     public string Status { get; set; } = status;
     public DateTimeOffset? SentAt { get; set; } = sentAt;
 }
+
+public sealed record DailyDigestTaskItem(
+    Guid TaskId,
+    string Title,
+    TaskStatus Status,
+    string? Priority,
+    DateOnly? PlannedDate,
+    DateTimeOffset? StartAt,
+    DateOnly? DueDate);
+
+public sealed record DailyDigestPayload(
+    string UserId,
+    DateOnly Date,
+    string TeamsDestination,
+    int PlannedTaskCount,
+    IReadOnlyList<DailyDigestTaskItem> Tasks,
+    string Message);
+
+public sealed record DailyDigestSendResult(
+    string UserId,
+    DateOnly Date,
+    bool Sent,
+    string Status,
+    string TeamsDestination,
+    int PlannedTaskCount);
 
 public sealed class IntegrationSetting
 {
@@ -1409,7 +2081,8 @@ public sealed class TaskQuery
 }
 
 public sealed record BulkChecklistImportRequest(string RawText, string CategoryName, List<string>? DaysPerWeek);
-public sealed record CommitChecklistImportRequest(List<Guid> SelectedDraftIds);
+public sealed record CommitChecklistImportRequest(List<Guid> SelectedDraftIds, List<Guid>? SelectedConfidenceIds = null, DateOnly? StartWeekDate = null);
+public sealed record ToggleWeekConfidenceRequest(bool IsDone);
 public sealed record CreateCategoryRequest(string Name, Guid? ParentCategoryId);
 public sealed record UpdateCategoryRequest(string? Name, Guid? ParentCategoryId);
 
@@ -1419,12 +2092,15 @@ public sealed record CreateTaskRequest(
     Guid? CategoryId,
     Guid? SubCategoryId,
     DateOnly? PlannedWeekStart,
+    DateOnly? PlannedDate,
     DateOnly? DueDate,
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
     string? Priority,
     TaskStatus? Status,
-    string? AssignedTo);
+    string? AssignedTo,
+    string? Pattern = null,
+    Difficulty? Difficulty = null);
 
 public sealed record UpdateTaskRequest(
     string? Title,
@@ -1432,14 +2108,22 @@ public sealed record UpdateTaskRequest(
     Guid? CategoryId,
     Guid? SubCategoryId,
     DateOnly? PlannedWeekStart,
+    DateOnly? PlannedDate,
     DateOnly? DueDate,
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
     string? Priority,
-    int? IfMatchVersion);
+    int? IfMatchVersion,
+    string? Pattern = null,
+    Difficulty? Difficulty = null,
+    string? QuestionAndReasoning = null,
+    string? LogicNotes = null,
+    string? AlgorithmNotes = null,
+    string? DiagramContent = null);
 
 public sealed record UpdateTaskStatusRequest(TaskStatus Status, bool OverrideIncompleteSubsteps, int? IfMatchVersion);
-public sealed record CreateSubstepRequest(string Title);
+public sealed record BulkDeleteTasksRequest(List<Guid>? TaskIds);
+public sealed record CreateSubstepRequest(string Title, int Weight = 0);
 public sealed record UpdateSubstepRequest(string? Title, bool? IsDone, int? IfMatchVersion);
 public sealed record CreateLinkRequest(string Url, string? Label, string? SourceType);
 public sealed record UpdateLinkRequest(string? Url, string? Label, string? SourceType);

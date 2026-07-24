@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus"
+    },
+    "environment": {
+      "value": "prod"
+    },
+    "imageTag": {
+      "value": "latest"
+    },
+    "entraClientId": {
+      "value": "6d46b91d-8f72-4ac0-ac88-03c044f86ea9"
+    },
+    "entraTenantId": {
+      "value": "organizations"
+    },
+    "acrName": {
+      "value": "<YOUR_ACR_NAME>"
+    },
+    "pgHost": {
+      "value": "roraqueststore.postgres.database.azure.com"
+    },
+    "pgDatabase": {
+      "value": "rora-quest-db"
+    },
+    "pgUsername": {
+      "value": "cgbimbu"
+    }
+  }
+}
