@@ -62,7 +62,7 @@ After deployment, the outputs will show:
 ## Step 3 — Load secrets into Key Vault
 
 ```bash
-KEY_VAULT_NAME="rora-quest-kv-prod"  # from deployment output
+KEY_VAULT_NAME="rora-kv-prod"  # from deployment output
 
 # PostgreSQL connection string
 az keyvault secret set \

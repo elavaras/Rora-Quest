@@ -43,7 +43,7 @@ param pgUsername string
 // Key Vault — stores runtime secrets
 // ─────────────────────────────────────────────
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
-  name: 'rora-quest-kv-${environment}'
+  name: 'rora-kv-${environment}'
   location: location
   properties: {
     sku: { family: 'A', name: 'standard' }
