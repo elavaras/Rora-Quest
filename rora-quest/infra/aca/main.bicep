@@ -20,15 +20,8 @@ param entraClientId string
 @description('Tenant mode — use "organizations" for multi-tenant work/school accounts')
 param entraTenantId string = 'organizations'
 
-@description('Name of the Azure Container Registry')
+@description('Name of the Azure Container Registry (existing)')
 param acrName string
-
-@description('ACR admin username used by Container Apps to pull images')
-param acrUsername string
-
-@secure()
-@description('ACR admin password used by Container Apps to pull images')
-param acrPassword string
 
 @description('Existing Azure PostgreSQL server FQDN (e.g. roraqueststore.postgres.database.azure.com)')
 param pgHost string = 'roraqueststore.postgres.database.azure.com'
@@ -38,6 +31,32 @@ param pgDatabase string = 'rora-quest-db'
 
 @description('PostgreSQL username')
 param pgUsername string
+
+// ─────────────────────────────────────────────
+// User-Assigned Managed Identity — ACR pull
+// ─────────────────────────────────────────────
+resource pullIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'rora-quest-pull-id-${environment}'
+  location: location
+}
+
+// Reference the existing ACR
+resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  name: acrName
+}
+
+// Grant AcrPull to the UAMI so Container Apps can pull images
+var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+
+resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(acr.id, pullIdentity.id, acrPullRoleId)
+  scope: acr
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
+    principalId: pullIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
 
 // ─────────────────────────────────────────────
 // Key Vault — stores runtime secrets
@@ -90,7 +109,10 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'rora-quest-api'
   location: location
   identity: {
-    type: 'SystemAssigned'
+    type: 'SystemAssigned, UserAssigned'
+    userAssignedIdentities: {
+      '${pullIdentity.id}': {}
+    }
   }
   properties: {
     managedEnvironmentId: caEnvironment.id
@@ -109,15 +131,10 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
       registries: [
         {
           server: '${acrName}.azurecr.io'
-          username: acrUsername
-          passwordSecretRef: 'acr-password'
+          identity: pullIdentity.id
         }
       ]
       secrets: [
-        {
-          name: 'acr-password'
-          value: acrPassword
-        }
         {
           name: 'kv-ref-entra-secret'
           keyVaultUrl: '${keyVault.properties.vaultUri}secrets/EntraClientSecret'
@@ -185,7 +202,10 @@ resource webApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'rora-quest-web'
   location: location
   identity: {
-    type: 'SystemAssigned'
+    type: 'SystemAssigned, UserAssigned'
+    userAssignedIdentities: {
+      '${pullIdentity.id}': {}
+    }
   }
   properties: {
     managedEnvironmentId: caEnvironment.id
@@ -198,16 +218,10 @@ resource webApp 'Microsoft.App/containerApps@2023-05-01' = {
       registries: [
         {
           server: '${acrName}.azurecr.io'
-          username: acrUsername
-          passwordSecretRef: 'acr-password'
+          identity: pullIdentity.id
         }
       ]
-      secrets: [
-        {
-          name: 'acr-password'
-          value: acrPassword
-        }
-      ]
+      secrets: []
     }
     template: {
       containers: [
@@ -260,3 +274,4 @@ output apiUrl string = 'https://${apiApp.properties.configuration.ingress.fqdn}'
 output webUrl string = 'https://${webApp.properties.configuration.ingress.fqdn}'
 output keyVaultName string = keyVault.name
 output keyVaultUri string = keyVault.properties.vaultUri
+output pullIdentityId string = pullIdentity.id
