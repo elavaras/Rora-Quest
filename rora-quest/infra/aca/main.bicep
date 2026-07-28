@@ -23,6 +23,13 @@ param entraTenantId string = 'organizations'
 @description('Name of the Azure Container Registry')
 param acrName string
 
+@description('ACR admin username used by Container Apps to pull images')
+param acrUsername string
+
+@secure()
+@description('ACR admin password used by Container Apps to pull images')
+param acrPassword string
+
 @description('Existing Azure PostgreSQL server FQDN (e.g. roraqueststore.postgres.database.azure.com)')
 param pgHost string = 'roraqueststore.postgres.database.azure.com'
 
@@ -102,10 +109,15 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
       registries: [
         {
           server: '${acrName}.azurecr.io'
-          identity: 'system'
+          username: acrUsername
+          passwordSecretRef: 'acr-password'
         }
       ]
       secrets: [
+        {
+          name: 'acr-password'
+          value: acrPassword
+        }
         {
           name: 'kv-ref-entra-secret'
           keyVaultUrl: '${keyVault.properties.vaultUri}secrets/EntraClientSecret'
@@ -186,7 +198,14 @@ resource webApp 'Microsoft.App/containerApps@2023-05-01' = {
       registries: [
         {
           server: '${acrName}.azurecr.io'
-          identity: 'system'
+          username: acrUsername
+          passwordSecretRef: 'acr-password'
+        }
+      ]
+      secrets: [
+        {
+          name: 'acr-password'
+          value: acrPassword
         }
       ]
     }
@@ -230,35 +249,6 @@ resource apiKvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleId)
     principalId: apiApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// ─────────────────────────────────────────────
-// RBAC — grant API + Web managed identities ACRPull
-// ─────────────────────────────────────────────
-var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-
-resource acr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' existing = {
-  name: acrName
-}
-
-resource apiAcrRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, apiApp.id, acrPullRoleId)
-  scope: acr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
-    principalId: apiApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource webAcrRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, webApp.id, acrPullRoleId)
-  scope: acr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
-    principalId: webApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
 }

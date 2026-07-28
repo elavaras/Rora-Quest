@@ -34,6 +34,7 @@ jobs:
             --resource-group rora-request \
             --template-file rora-quest/infra/aca/main.bicep \
             --parameters @rora-quest/infra/aca/main.parameters.json \
+            --parameters acrUsername="${{ secrets.ACR_USERNAME }}" acrPassword="${{ secrets.ACR_PASSWORD }}" \
             --verbose
 
       - name: Show deployment outputs
