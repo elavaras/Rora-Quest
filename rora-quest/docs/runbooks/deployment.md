@@ -30,7 +30,7 @@ GitHub Actions will trigger automatically on every future push to `master`.
 
 ```bash
 # Variables — set these once
-RESOURCE_GROUP="rora-request"
+RESOURCE_GROUP="Rora-Quest"
 LOCATION="canadacentral"
 ACR_NAME="roraquestacr"          # must be globally unique, lowercase, alphanumeric only
 
@@ -110,7 +110,7 @@ Also add these as GitHub **Variables** (not secrets):
 
 | Variable name | Value |
 |---|---|
-| `AZURE_RESOURCE_GROUP` | `rora-request` |
+| `AZURE_RESOURCE_GROUP` | `Rora-Quest` |
 | `ACR_NAME` | `roraquestacr` |
 
 ---

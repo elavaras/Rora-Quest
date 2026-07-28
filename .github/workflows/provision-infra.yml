@@ -25,13 +25,13 @@ jobs:
       - name: Create resource group
         run: |
           az group create \
-            --name rora-request \
+            --name Rora-Quest \
             --location canadacentral
 
       - name: Deploy Bicep infrastructure
         run: |
           az deployment group create \
-            --resource-group rora-request \
+            --resource-group Rora-Quest \
             --template-file rora-quest/infra/aca/main.bicep \
             --parameters @rora-quest/infra/aca/main.parameters.json \
             --parameters acrUsername="${{ secrets.ACR_USERNAME }}" acrPassword="${{ secrets.ACR_PASSWORD }}" \
@@ -40,7 +40,7 @@ jobs:
       - name: Show deployment outputs
         run: |
           az deployment group show \
-            --resource-group rora-request \
+            --resource-group Rora-Quest \
             --name main \
             --query properties.outputs \
             -o table
