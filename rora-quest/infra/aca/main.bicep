@@ -93,8 +93,8 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
         targetPort: 5000
         transport: 'http'
         corsPolicy: {
-          allowedOrigins: [webApp.properties.configuration.ingress.fqdn != '' ? 'https://${webApp.properties.configuration.ingress.fqdn}' : '*']
-          allowCredentials: true
+          allowedOrigins: ['*']
+          allowCredentials: false
           allowedMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
           allowedHeaders: ['*']
         }
