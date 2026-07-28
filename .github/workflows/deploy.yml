@@ -6,6 +6,10 @@ on:
     types: [completed]
     branches: [main]
 
+env:
+  RESOURCE_GROUP: Rora-Quest
+  ACR_SERVER: roraquestacr.azurecr.io
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -21,21 +25,21 @@ jobs:
         run: |
           az containerapp update \
             --name rora-quest-api \
-            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
-            --image ${{ secrets.ACR_LOGIN_SERVER }}/rora-quest-api:${{ github.event.workflow_run.head_sha }}
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_SERVER/rora-quest-api:${{ github.event.workflow_run.head_sha }}"
 
       - name: Deploy Web Container App
         run: |
           az containerapp update \
             --name rora-quest-web \
-            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
-            --image ${{ secrets.ACR_LOGIN_SERVER }}/rora-quest-web:${{ github.event.workflow_run.head_sha }}
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_SERVER/rora-quest-web:${{ github.event.workflow_run.head_sha }}"
 
       - name: Verify API health
         run: |
           API_URL=$(az containerapp show \
             -n rora-quest-api \
-            -g ${{ vars.AZURE_RESOURCE_GROUP }} \
+            -g "$RESOURCE_GROUP" \
             --query "properties.configuration.ingress.fqdn" -o tsv)
           echo "API FQDN: $API_URL"
           curl -sf "https://$API_URL/health" || (echo "Health check failed" && exit 1)
