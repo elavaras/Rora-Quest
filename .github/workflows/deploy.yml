@@ -37,9 +37,22 @@ jobs:
 
       - name: Verify API health
         run: |
+          echo "Waiting 30s for container to stabilise..."
+          sleep 30
           API_URL=$(az containerapp show \
             -n rora-quest-api \
             -g "$RESOURCE_GROUP" \
             --query "properties.configuration.ingress.fqdn" -o tsv)
           echo "API FQDN: $API_URL"
-          curl -sf "https://$API_URL/health" || (echo "Health check failed" && exit 1)
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://$API_URL/health" || true)
+            echo "Attempt $i — HTTP $STATUS"
+            [ "$STATUS" = "200" ] && echo "Health check passed" && exit 0
+            sleep 15
+          done
+          echo "Health check failed after 5 attempts — fetching container logs for diagnosis:"
+          az containerapp logs show \
+            -n rora-quest-api \
+            -g "$RESOURCE_GROUP" \
+            --tail 50 || true
+          exit 1
