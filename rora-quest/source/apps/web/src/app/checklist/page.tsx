@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { getApiAuthHeaders } from "../lib/user-session";
+import { getApiAuthHeaders, getApiBaseUrl } from "../lib/user-session";
 
 type Category = {
   id: string;
@@ -32,10 +32,8 @@ type CommitResult = {
   confidenceCount: number;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000";
-
 async function apiCall<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
     headers: {
       ...getApiAuthHeaders(),

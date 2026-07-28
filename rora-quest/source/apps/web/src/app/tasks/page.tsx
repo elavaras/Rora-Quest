@@ -2,9 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getApiAuthHeaders } from "../lib/user-session";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000";
+import { getApiAuthHeaders, getApiBaseUrl } from "../lib/user-session";
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const WORKLOAD_MODES = ["Green", "Yellow", "Red"] as const;
@@ -48,7 +46,7 @@ type ViewMode = "grid" | "list";
 type PendingMove = { taskId: string; taskTitle: string; toWeekStart: string; toPlannedDate: string };
 
 async function apiCall<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
     headers: {
       ...getApiAuthHeaders(),

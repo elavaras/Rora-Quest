@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AuthMe } from "../lib/user-session";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000";
+import { AuthMe, getApiBaseUrl } from "../lib/user-session";
 
 export default function UserSwitcher() {
   const [me, setMe] = useState<AuthMe | null>(null);
@@ -14,7 +12,8 @@ export default function UserSwitcher() {
     const load = async () => {
       setLoading(true);
       try {
-        const response = await fetch(`${API_BASE}/api/auth/me`, {
+        const apiBase = getApiBaseUrl();
+        const response = await fetch(`${apiBase}/api/auth/me`, {
           credentials: "include",
           cache: "no-store"
         });
@@ -37,13 +36,15 @@ export default function UserSwitcher() {
   }, []);
 
   const signIn = () => {
+    const apiBase = getApiBaseUrl();
     const returnUrl = encodeURIComponent(window.location.href);
-    window.location.href = `${API_BASE}/api/auth/login?returnUrl=${returnUrl}`;
+    window.location.href = `${apiBase}/api/auth/login?returnUrl=${returnUrl}`;
   };
 
   const signOut = () => {
+    const apiBase = getApiBaseUrl();
     const returnUrl = encodeURIComponent(window.location.origin);
-    window.location.href = `${API_BASE}/api/auth/logout?returnUrl=${returnUrl}`;
+    window.location.href = `${apiBase}/api/auth/logout?returnUrl=${returnUrl}`;
   };
 
   return (

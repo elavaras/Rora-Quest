@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getApiAuthHeaders } from "../lib/user-session";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000";
+import { getApiAuthHeaders, getApiBaseUrl } from "../lib/user-session";
 
 type Streaks = { currentStreakDays: number; totalCompletedDays: number };
 type Consistency = { avgProgressPercent: number; taskCount: number };
 type Recommendation = { profile: string; suggestedMode: string | number; completionRatePercent: number };
 
 async function apiCall<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     headers: {
       ...getApiAuthHeaders()
     },

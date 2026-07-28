@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { getApiAuthHeaders } from "../../lib/user-session";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000";
+import { getApiAuthHeaders, getApiBaseUrl } from "../../lib/user-session";
 const DIFFICULTIES = ["Easy", "Medium", "Hard"] as const;
 
 type SubStep = {
@@ -46,7 +44,7 @@ type TaskItem = {
 };
 
 async function apiCall<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
     headers: {
       ...getApiAuthHeaders(),
