@@ -17,6 +17,8 @@ source/apps/api/src/**/obj
 
 # Infra source (not needed in image)
 infra
+!infra/sql/
+!infra/sql/**
 docs
 scripts
 
