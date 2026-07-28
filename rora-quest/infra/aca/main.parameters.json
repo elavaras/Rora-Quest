@@ -18,7 +18,7 @@
       "value": "organizations"
     },
     "acrName": {
-      "value": "<YOUR_ACR_NAME>"
+      "value": "roraquestacr"
     },
     "pgHost": {
       "value": "roraqueststore.postgres.database.azure.com"
