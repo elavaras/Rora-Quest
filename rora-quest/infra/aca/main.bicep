@@ -158,6 +158,7 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
           }
           env: [
             { name: 'ASPNETCORE_ENVIRONMENT', value: 'Production' }
+            { name: 'Postgres__MigrationsPath', value: '/app/migrations' }
             { name: 'EntraAuth__ClientId', value: entraClientId }
             { name: 'EntraAuth__TenantId', value: entraTenantId }
             { name: 'EntraAuth__CallbackPath', value: '/signin-oidc' }
