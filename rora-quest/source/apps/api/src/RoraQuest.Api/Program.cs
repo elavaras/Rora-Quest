@@ -188,6 +188,17 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     migrator.Run();
 }
 
+app.Use(async (context, next) =>
+{
+    await next();
+    if (HttpMethods.IsOptions(context.Request.Method)
+        && context.Response.Headers.ContainsKey("Access-Control-Allow-Origin")
+        && !context.Response.Headers.ContainsKey("Access-Control-Allow-Credentials"))
+    {
+        context.Response.Headers.Append("Access-Control-Allow-Credentials", "true");
+    }
+});
+
 app.UseCors("web-dev");
 app.UseForwardedHeaders();
 if (oauthEnabled)
