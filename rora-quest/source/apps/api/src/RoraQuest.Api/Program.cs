@@ -11,12 +11,19 @@ using Npgsql;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
+var corsOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "")
+    .Split(',', ';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("web-dev", policy =>
     {
-        policy
-            .WithOrigins("http://localhost:3000", "http://localhost:3001")
+        var origins = corsOrigins.Length > 0
+            ? corsOrigins
+            : ["http://localhost:3000", "http://localhost:3001"];
+
+        policy.WithOrigins(origins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
