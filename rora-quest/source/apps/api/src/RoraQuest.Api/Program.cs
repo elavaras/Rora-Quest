@@ -1,8 +1,10 @@
 using System.Text.Json.Serialization;
+using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -33,6 +35,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 var entra = builder.Configuration.GetSection("EntraAuth").Get<EntraAuthOptions>() ?? new EntraAuthOptions();
 var authority = $"https://login.microsoftonline.com/{entra.TenantId}/v2.0";
 var oauthEnabled = !string.IsNullOrWhiteSpace(entra.ClientId) && !string.IsNullOrWhiteSpace(entra.ClientSecret);
+var isMultiTenantAuthority =
+    string.Equals(entra.TenantId, "organizations", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(entra.TenantId, "common", StringComparison.OrdinalIgnoreCase);
 
 if (oauthEnabled)
 {
@@ -92,6 +97,24 @@ if (oauthEnabled)
             options.Scope.Add("openid");
             options.Scope.Add("profile");
             options.Scope.Add("email");
+            if (isMultiTenantAuthority)
+            {
+                options.TokenValidationParameters.IssuerValidator = (issuer, securityToken, validationParameters) =>
+                {
+                    var tid = GetTenantIdFromToken(securityToken);
+                    if (!string.IsNullOrWhiteSpace(tid))
+                    {
+                        var expectedIssuer = $"https://login.microsoftonline.com/{tid}/v2.0";
+                        if (string.Equals(issuer, expectedIssuer, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return issuer;
+                        }
+                    }
+
+                    throw new SecurityTokenInvalidIssuerException(
+                        $"Issuer validation failed for multi-tenant sign-in. Issuer '{issuer}' did not match the token tenant issuer.");
+                };
+            }
             options.Events = new OpenIdConnectEvents
             {
                 OnRedirectToIdentityProvider = ctx =>
@@ -169,3 +192,21 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "RoraQuest
 app.MapRoraQuestEndpoints(oauthEnabled);
 
 app.Run();
+
+static string? GetTenantIdFromToken(SecurityToken securityToken)
+{
+    if (securityToken is not JwtSecurityToken jwt)
+    {
+        return null;
+    }
+
+    foreach (var claim in jwt.Claims)
+    {
+        if (string.Equals(claim.Type, "tid", StringComparison.OrdinalIgnoreCase))
+        {
+            return claim.Value;
+        }
+    }
+
+    return null;
+}
