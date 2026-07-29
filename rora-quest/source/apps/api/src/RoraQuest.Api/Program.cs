@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 
@@ -195,17 +196,20 @@ app.Run();
 
 static string? GetTenantIdFromToken(SecurityToken securityToken)
 {
-    if (securityToken is not JwtSecurityToken jwt)
+    // .NET 8 OIDC handler uses JsonWebToken (Microsoft.IdentityModel.JsonWebTokens)
+    if (securityToken is JsonWebToken jsonWebToken)
     {
-        return null;
+        return jsonWebToken.Claims
+            .FirstOrDefault(c => string.Equals(c.Type, "tid", StringComparison.OrdinalIgnoreCase))
+            ?.Value;
     }
 
-    foreach (var claim in jwt.Claims)
+    // Legacy fallback for JwtSecurityToken
+    if (securityToken is JwtSecurityToken jwt)
     {
-        if (string.Equals(claim.Type, "tid", StringComparison.OrdinalIgnoreCase))
-        {
-            return claim.Value;
-        }
+        return jwt.Claims
+            .FirstOrDefault(c => string.Equals(c.Type, "tid", StringComparison.OrdinalIgnoreCase))
+            ?.Value;
     }
 
     return null;
