@@ -256,7 +256,13 @@ public static class ApiEndpoints
             }
 
             var result = svc.GetWeekPlan(UserScope.GetUserId(http), week);
-            return result is null ? Results.NotFound() : Results.Ok(result);
+            if (result is null)
+            {
+                var now = DateTimeOffset.UtcNow;
+                return Results.Ok(new WeekPlan(week, WorkloadMode.Yellow, null, now, now));
+            }
+
+            return Results.Ok(result);
         });
 
         api.MapPut("/week-plans/{weekStart}", (string weekStart, UpsertWeekPlanRequest req, RoraQuestService svc, HttpContext http) =>
