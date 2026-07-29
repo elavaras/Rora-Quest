@@ -188,15 +188,21 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     migrator.Run();
 }
 
-app.Use(async (context, next) =>
+app.Use((context, next) =>
 {
-    await next();
-    if (HttpMethods.IsOptions(context.Request.Method)
-        && context.Response.Headers.ContainsKey("Access-Control-Allow-Origin")
-        && !context.Response.Headers.ContainsKey("Access-Control-Allow-Credentials"))
+    context.Response.OnStarting(() =>
     {
-        context.Response.Headers.Append("Access-Control-Allow-Credentials", "true");
-    }
+        if (HttpMethods.IsOptions(context.Request.Method)
+            && context.Response.Headers.ContainsKey("Access-Control-Allow-Origin")
+            && !context.Response.Headers.ContainsKey("Access-Control-Allow-Credentials"))
+        {
+            context.Response.Headers.Append("Access-Control-Allow-Credentials", "true");
+        }
+
+        return Task.CompletedTask;
+    });
+
+    return next();
 });
 
 app.UseCors("web-dev");
