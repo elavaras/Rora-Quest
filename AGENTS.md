@@ -53,3 +53,36 @@ npm run dev
 - Keep changes scoped to the relevant app (`api`, `web`, or `infra`).
 - Do not commit editor-local artifacts (for example `.vs/`, user-specific files).
 - Prefer minimal, focused patches; avoid broad refactors unless requested.
+
+## Required workflow
+
+Agents must follow this sequence:
+
+1. PRD must exist before design.
+2. Design must exist before implementation.
+3. Implementation must include tests.
+4. Testing agent must validate acceptance criteria.
+5. No agent may merge PRs. Human approval is required.
+
+## Branching
+
+Use branch format:
+feature/<short-feature-name>
+
+## Pull request expectations
+
+Every PR must include:
+- Feature request link
+- PRD link
+- Design link
+- Test evidence
+- Known risks
+- Rollback plan
+
+## Safety
+
+Do not:
+- Commit secrets
+- Modify auth/security code without explicit design approval
+- Delete files unless the design says so
+- Change public API contracts without documenting migration impact
