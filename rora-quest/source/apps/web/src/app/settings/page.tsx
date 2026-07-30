@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getApiAuthHeaders, getApiBaseUrl } from "../lib/user-session";
+import { ThemeSelector } from "../components/theme-selector";
 
 type IntegrationSetting = {
   provider: string;
@@ -182,6 +183,12 @@ export default function SettingsPage() {
 
   return (
     <section className="page">
+      <div className="card">
+        <h2>Appearance</h2>
+        <p className="muted">Choose your preferred color theme. System follows your OS setting.</p>
+        <ThemeSelector />
+      </div>
+
       <div className="card">
         <h2>Integration Settings</h2>
         <p className="muted">Connect Outlook and Teams accounts for calendar + notifications.</p>
