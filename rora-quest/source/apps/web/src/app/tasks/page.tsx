@@ -29,6 +29,7 @@ type TaskItem = {
   pattern: string | null;
   difficulty: (typeof DIFFICULTIES)[number] | null;
   subSteps: SubStep[];
+  actualHours: number | null;
 };
 
 type Category = { id: string; name: string; parentCategoryId: string | null };
@@ -498,6 +499,8 @@ export default function TasksPage() {
   const weekEnd = addDays(weekStart, 6);
   const weekTitle = `Week of ${longDate(weekStart)} – ${longDate(weekEnd)}, ${weekEnd.getFullYear()}`;
 
+  const totalActualHours = tasks.reduce((sum, t) => sum + (t.actualHours ?? 0), 0);
+
   const allWeekTaskIds = tasks.map((t) => t.id);
   const selectedCount = allWeekTaskIds.filter((id) => selectedIds.has(id)).length;
   const allWeekSelected =
@@ -563,6 +566,11 @@ export default function TasksPage() {
             {renderBulkToolbar()}
           </div>
         </div>
+        {!loading && (
+          <p className="muted" style={{ fontSize: "0.875rem", margin: "0.25rem 0 0 0" }}>
+            Total actual hours: {totalActualHours.toFixed(1)}h
+          </p>
+        )}
         {message && <p className="success-text">{message}</p>}
         {error && <p className="error-text">{error}</p>}
       </div>
