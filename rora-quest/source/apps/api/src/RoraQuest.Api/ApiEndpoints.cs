@@ -144,7 +144,14 @@ public static class ApiEndpoints
 
         group.MapPost("", (CreateTaskRequest req, RoraQuestService svc, HttpContext http) =>
         {
-            return Results.Ok(svc.CreateTask(UserScope.GetUserId(http), req));
+            try
+            {
+                return Results.Ok(svc.CreateTask(UserScope.GetUserId(http), req));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
         });
 
         // Must be registered before /{taskId:guid} to prevent route ambiguity
@@ -459,6 +466,7 @@ public sealed class UserData
 public sealed class RoraQuestService(IRoraQuestStore store)
 {
     private readonly object _gate = new();
+    private const string DsaRootCategoryName = "DSA";
 
     private static readonly Regex WeekHeadingRegex = new(
         @"^Week\s+(?<week>\d+)\s*:\s*(?<subcategory>.+)$",
@@ -930,6 +938,10 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         lock (_gate)
         {
             var user = GetUser(userId);
+            if (IsDsaFlowCategory(user, req.CategoryId, req.SubCategoryId))
+            {
+                throw new InvalidOperationException("Manual task creation is disabled for the DSA category.");
+            }
             var task = new TaskItem
             {
                 Id = Guid.NewGuid(),
@@ -1030,11 +1042,13 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             if (req.EstimatedHours is < 0) return ServiceResult<TaskItem>.Validation("EstimatedHours must be >= 0.");
             if (req.ActualHours is < 0) return ServiceResult<TaskItem>.Validation("ActualHours must be >= 0.");
             if (req.StoryPoints is < 0) return ServiceResult<TaskItem>.Validation("StoryPoints must be >= 0.");
+            if (req.CategoryId is not null || req.SubCategoryId is not null)
+            {
+                return ServiceResult<TaskItem>.Validation("Task category updates are currently disabled.");
+            }
 
             if (req.Title is not null) task.Title = req.Title.Trim();
             if (req.Description is not null) task.Description = req.Description;
-            if (req.CategoryId is not null) task.CategoryId = req.CategoryId;
-            task.SubCategoryId = req.SubCategoryId;
             if (req.PlannedWeekStart is not null) task.PlannedWeekStart = req.PlannedWeekStart.Value;
             if (req.PlannedDate is not null)
             {
@@ -1069,6 +1083,10 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskItem>.NotFound();
             if (req.IfMatchVersion is not null && req.IfMatchVersion != task.RowVersion) return ServiceResult<TaskItem>.Conflict("Row version mismatch.");
+            if (IsDsaTask(user, task))
+            {
+                return ServiceResult<TaskItem>.Validation("Manual task status updates are disabled for the DSA category.");
+            }
 
             var old = task.Status;
             if (req.Status == TaskStatus.Done && task.SubSteps.Count > 0 && task.SubSteps.Any(s => !s.IsDone) && !req.OverrideIncompleteSubsteps)
@@ -1100,6 +1118,10 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskSubStep>.NotFound();
+            if (IsDsaTask(user, task))
+            {
+                return ServiceResult<TaskSubStep>.Validation("Manual subtask creation is disabled for the DSA category.");
+            }
             var nextOrder = task.SubSteps.Count == 0 ? 1 : task.SubSteps.Max(s => s.OrderIndex) + 1;
             var step = new TaskSubStep(Guid.NewGuid(), req.Title.Trim(), false, nextOrder, null, 1, req.Weight);
             task.SubSteps.Add(step);
@@ -1118,6 +1140,10 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             var sub = task.SubSteps.FirstOrDefault(x => x.Id == subStepId);
             if (sub is null) return ServiceResult<TaskSubStep>.NotFound();
             if (req.IfMatchVersion is not null && req.IfMatchVersion != sub.RowVersion) return ServiceResult<TaskSubStep>.Conflict("Substep row version mismatch.");
+            if (req.IsDone is not null && IsDsaTask(user, task))
+            {
+                return ServiceResult<TaskSubStep>.Validation("Manual subtask status updates are disabled for the DSA category.");
+            }
 
             if (req.Title is not null) sub.Title = req.Title.Trim();
             if (req.IsDone is not null)
@@ -1832,6 +1858,41 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         };
         user.Categories[category.Id] = category;
         return category;
+    }
+
+    private static bool IsDsaTask(UserData user, TaskItem task) =>
+        IsDsaFlowCategory(user, task.CategoryId, task.SubCategoryId);
+
+    private static bool IsDsaFlowCategory(UserData user, Guid? categoryId, Guid? subCategoryId)
+    {
+        return IsDsaCategory(user, categoryId) || IsDsaCategory(user, subCategoryId);
+    }
+
+    private static bool IsDsaCategory(UserData user, Guid? categoryId)
+    {
+        if (categoryId is null)
+        {
+            return false;
+        }
+
+        var currentId = categoryId.Value;
+        var visited = new HashSet<Guid>();
+        while (visited.Add(currentId) && user.Categories.TryGetValue(currentId, out var category))
+        {
+            if (string.Equals(category.Name, DsaRootCategoryName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (category.ParentCategoryId is null)
+            {
+                break;
+            }
+
+            currentId = category.ParentCategoryId.Value;
+        }
+
+        return false;
     }
 }
 

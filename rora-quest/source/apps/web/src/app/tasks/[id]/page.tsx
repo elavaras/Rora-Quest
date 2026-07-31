@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { getApiAuthHeaders, getApiBaseUrl } from "../../lib/user-session";
 const DIFFICULTIES = ["Easy", "Medium", "Hard"] as const;
+const TASK_STATUSES = ["Todo", "InProgress", "Done", "Cancelled", "Skipped"] as const;
+const DSA_CATEGORY_NAME = "DSA";
 
 type SubStep = {
   id: string;
@@ -29,6 +31,8 @@ type TaskItem = {
   id: string;
   title: string;
   status: "Todo" | "InProgress" | "Done" | "Cancelled" | "Skipped";
+  categoryId: string | null;
+  subCategoryId: string | null;
   plannedWeekStart: string;
   plannedDate: string | null;
   dueDate: string | null;
@@ -45,6 +49,7 @@ type TaskItem = {
   links?: ReferenceLink[];
   assets?: TaskAsset[];
 };
+type Category = { id: string; name: string; parentCategoryId: string | null };
 
 async function apiCall<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
@@ -81,6 +86,28 @@ function weightedProgress(subSteps: SubStep[], status: string): number {
 
 type Props = { params: { id: string } };
 
+function isDsaCategoryId(categoryId: string | null, categoryById: Map<string, Category>): boolean {
+  if (!categoryId) {
+    return false;
+  }
+
+  let currentId: string | null = categoryId;
+  const visited = new Set<string>();
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const category = categoryById.get(currentId);
+    if (!category) {
+      return false;
+    }
+    if (category.name.trim().toUpperCase() === DSA_CATEGORY_NAME) {
+      return true;
+    }
+    currentId = category.parentCategoryId;
+  }
+
+  return false;
+}
+
 export default function TaskDetailPage({ params }: Props) {
   const { id } = params;
   const router = useRouter();
@@ -88,6 +115,7 @@ export default function TaskDetailPage({ params }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingMeta, setSavingMeta] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pattern, setPattern] = useState("");
   const [difficulty, setDifficulty] = useState("");
@@ -102,6 +130,8 @@ export default function TaskDetailPage({ params }: Props) {
   const [estimatedHours, setEstimatedHours] = useState<string>("");
   const [actualHours, setActualHours] = useState<string>("");
   const [storyPoints, setStoryPoints] = useState<string>("");
+  const [statusDraft, setStatusDraft] = useState<TaskItem["status"]>("Todo");
+  const [categories, setCategories] = useState<Category[]>([]);
   const [removingAssetId, setRemovingAssetId] = useState<string | null>(null);
   const [opStatus, setOpStatus] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(
     null
@@ -131,6 +161,7 @@ export default function TaskDetailPage({ params }: Props) {
     setEstimatedHours(nextTask.estimatedHours != null ? String(nextTask.estimatedHours) : "");
     setActualHours(nextTask.actualHours != null ? String(nextTask.actualHours) : "");
     setStoryPoints(nextTask.storyPoints != null ? String(nextTask.storyPoints) : "");
+    setStatusDraft(nextTask.status);
   }, []);
 
   const load = useCallback(async () => {
@@ -151,8 +182,18 @@ export default function TaskDetailPage({ params }: Props) {
     load();
   }, [load]);
 
+  useEffect(() => {
+    apiCall<Category[]>("/api/categories")
+      .then(setCategories)
+      .catch(() => setCategories([]));
+  }, []);
+
   const toggleSubStep = async (sub: SubStep) => {
     if (!task) return;
+    if (isDsaLocked) {
+      setStatus("error", "DSA subtasks are locked and cannot be updated manually.");
+      return;
+    }
     // optimistic update
     const next = task.subSteps.map((s) =>
       s.id === sub.id ? { ...s, isDone: !s.isDone } : s
@@ -195,6 +236,30 @@ export default function TaskDetailPage({ params }: Props) {
       setStatus("error", "Failed to save task details.");
     } finally {
       setSavingMeta(false);
+    }
+  };
+
+  const updateTaskStatus = async () => {
+    if (!task || statusDraft === task.status) return;
+    setSavingStatus(true);
+    setError(null);
+    setStatus("info", "Updating task status...");
+    try {
+      const updated = await apiCall<TaskItem>(`/api/tasks/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: statusDraft,
+          overrideIncompleteSubsteps: false
+        })
+      });
+      applyTaskToView(updated);
+      setStatus("success", "Task status updated.", 1800);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update task status.");
+      setStatus("error", "Failed to update task status.");
+      setStatusDraft(task.status);
+    } finally {
+      setSavingStatus(false);
     }
   };
 
@@ -312,6 +377,10 @@ export default function TaskDetailPage({ params }: Props) {
   };
 
   const progress = task ? weightedProgress(task.subSteps, task.status) : 0;
+  const categoryById = new Map(categories.map((category) => [category.id, category] as const));
+  const isDsaLocked = task
+    ? isDsaCategoryId(task.categoryId, categoryById) || isDsaCategoryId(task.subCategoryId, categoryById)
+    : false;
   const diagramImages = (task?.assets ?? []).filter(
     (a) =>
       (a.contentType?.startsWith("image/") ?? false) ||
@@ -349,6 +418,31 @@ export default function TaskDetailPage({ params }: Props) {
               <span className={`chip ${task.status.toLowerCase()}`}>{task.status}</span> ·{" "}
               {progress}%
             </div>
+            <div className="row" style={{ marginTop: "0.75rem", gap: "0.5rem" }}>
+              <select
+                aria-label="Task status"
+                value={statusDraft}
+                onChange={(event) => setStatusDraft(event.target.value as TaskItem["status"])}
+                disabled={isDsaLocked || savingStatus}
+              >
+                {TASK_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={updateTaskStatus}
+                disabled={isDsaLocked || savingStatus || statusDraft === task.status}
+              >
+                {savingStatus ? "Updating…" : "Update Status"}
+              </button>
+            </div>
+            {isDsaLocked && (
+              <p className="muted" style={{ marginTop: "0.5rem" }}>
+                DSA tasks are system-managed. Manual status and subtask updates are disabled.
+              </p>
+            )}
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${progress}%` }} />
             </div>
@@ -578,6 +672,7 @@ export default function TaskDetailPage({ params }: Props) {
                     <input
                       type="checkbox"
                       checked={s.isDone}
+                      disabled={isDsaLocked}
                       onChange={() => toggleSubStep(s)}
                     />
                     <span className={s.isDone ? "substep-done" : ""}>{s.title}</span>
