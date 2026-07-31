@@ -306,4 +306,118 @@ public class TaskEffortTrackingTests
         Assert.Equal(8, result.Value.StoryPoints);
         Assert.Equal("Updated Title", result.Value.Title);
     }
+
+    // -----------------------------------------------------------------------
+    // GetWeekActualHoursSummary tests
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void GetWeekActualHoursSummary_EmptyWeek_ReturnsZero()
+    {
+        var svc = CreateService();
+        var weekStart = new DateOnly(2026, 7, 28); // a Monday
+
+        var result = svc.GetWeekActualHoursSummary("user1", weekStart);
+
+        Assert.Equal(weekStart, result.WeekStart);
+        Assert.Equal(0m, result.TotalActualHours);
+    }
+
+    [Fact]
+    public void GetWeekActualHoursSummary_SumsOnlyTasksInWeek()
+    {
+        var svc = CreateService();
+        var weekStart = new DateOnly(2026, 7, 28);
+        var outsideWeekStart = new DateOnly(2026, 8, 4);
+
+        // 2 tasks inside the week
+        svc.CreateTask("user1", MinimalCreateRequest("Task A") with
+        {
+            PlannedWeekStart = weekStart,
+            ActualHours = 3.0m
+        });
+        svc.CreateTask("user1", MinimalCreateRequest("Task B") with
+        {
+            PlannedWeekStart = weekStart,
+            ActualHours = 5.5m
+        });
+        // 1 task outside the week — must not be counted
+        svc.CreateTask("user1", MinimalCreateRequest("Task C") with
+        {
+            PlannedWeekStart = outsideWeekStart,
+            ActualHours = 10.0m
+        });
+
+        var result = svc.GetWeekActualHoursSummary("user1", weekStart);
+
+        Assert.Equal(8.5m, result.TotalActualHours);
+    }
+
+    [Fact]
+    public void GetWeekActualHoursSummary_NullActualHours_Excluded()
+    {
+        var svc = CreateService();
+        var weekStart = new DateOnly(2026, 7, 28);
+
+        // Task with actualHours set
+        svc.CreateTask("user1", MinimalCreateRequest("Task With Hours") with
+        {
+            PlannedWeekStart = weekStart,
+            ActualHours = 4.0m
+        });
+        // Task without actualHours — must not contribute to the total
+        svc.CreateTask("user1", MinimalCreateRequest("Task No Hours") with
+        {
+            PlannedWeekStart = weekStart,
+            ActualHours = null
+        });
+
+        var result = svc.GetWeekActualHoursSummary("user1", weekStart);
+
+        Assert.Equal(4.0m, result.TotalActualHours);
+    }
+
+    [Fact]
+    public void GetWeekActualHoursSummary_PlannedDateFallback()
+    {
+        var svc = CreateService();
+        var weekStart = new DateOnly(2026, 7, 28);
+        // PlannedDate falls within the week (Wednesday)
+        var plannedDate = new DateOnly(2026, 7, 30);
+
+        // Task identified by PlannedDate (not PlannedWeekStart)
+        svc.CreateTask("user1", MinimalCreateRequest("Task By Date") with
+        {
+            PlannedWeekStart = null,
+            PlannedDate = plannedDate,
+            ActualHours = 6.0m
+        });
+
+        var result = svc.GetWeekActualHoursSummary("user1", weekStart);
+
+        Assert.Equal(6.0m, result.TotalActualHours);
+    }
+
+    [Fact]
+    public void GetWeekActualHoursSummary_ZeroActualHours_Included()
+    {
+        var svc = CreateService();
+        var weekStart = new DateOnly(2026, 7, 28);
+
+        // Zero is a valid, meaningful value and must be included
+        svc.CreateTask("user1", MinimalCreateRequest("Zero Hours Task") with
+        {
+            PlannedWeekStart = weekStart,
+            ActualHours = 0m
+        });
+        svc.CreateTask("user1", MinimalCreateRequest("Normal Hours Task") with
+        {
+            PlannedWeekStart = weekStart,
+            ActualHours = 2.0m
+        });
+
+        var result = svc.GetWeekActualHoursSummary("user1", weekStart);
+
+        Assert.Equal(2.0m, result.TotalActualHours);
+    }
 }

@@ -147,6 +147,15 @@ public static class ApiEndpoints
             return Results.Ok(svc.CreateTask(UserScope.GetUserId(http), req));
         });
 
+        // Must be registered before /{taskId:guid} to prevent route ambiguity
+        group.MapGet("/week-summary", (HttpContext http, RoraQuestService svc) =>
+        {
+            var weekStartStr = http.Request.Query["weekStart"].FirstOrDefault();
+            if (!DateOnly.TryParse(weekStartStr, out var weekStart))
+                return Results.BadRequest("weekStart query parameter is required (yyyy-MM-dd).");
+            return Results.Ok(svc.GetWeekActualHoursSummary(UserScope.GetUserId(http), weekStart));
+        });
+
         group.MapGet("/{taskId:guid}", (Guid taskId, RoraQuestService svc, HttpContext http) =>
         {
             var task = svc.GetTask(UserScope.GetUserId(http), taskId);
@@ -864,6 +873,22 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 .ThenBy(x => x.CreatedAt)
                 .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+    }
+
+    public WeekActualHoursSummary GetWeekActualHoursSummary(string userId, DateOnly weekStart)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            var weekEnd = weekStart.AddDays(6);
+            var total = user.Tasks.Values
+                .Where(t =>
+                    t.PlannedWeekStart == weekStart
+                    || (t.PlannedDate is not null && t.PlannedDate.Value >= weekStart && t.PlannedDate.Value <= weekEnd))
+                .Where(t => t.ActualHours is not null)
+                .Sum(t => t.ActualHours!.Value);
+            return new WeekActualHoursSummary(weekStart, total);
         }
     }
 
@@ -2165,3 +2190,4 @@ public sealed record SyncBatchRequest(List<Guid> TaskIds);
 public sealed record UpdateNotificationSettingsRequest(TimeOnly? DailyDigestTime, TimeOnly? EveningReminderTime, string? TeamsDestination);
 public sealed record ConnectMicrosoftRequest(string Provider, string AccountIdentifier);
 public sealed record MicrosoftCallbackRequest(string Provider, string Code);
+public sealed record WeekActualHoursSummary(DateOnly WeekStart, decimal TotalActualHours);
