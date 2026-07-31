@@ -1001,6 +1001,11 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskItem>.NotFound();
             if (req.IfMatchVersion is not null && req.IfMatchVersion != task.RowVersion) return ServiceResult<TaskItem>.Conflict("Row version mismatch.");
 
+            // Non-negative guards for effort fields (mirrors DB CHECK constraints)
+            if (req.EstimatedHours is < 0) return ServiceResult<TaskItem>.Validation("EstimatedHours must be >= 0.");
+            if (req.ActualHours is < 0) return ServiceResult<TaskItem>.Validation("ActualHours must be >= 0.");
+            if (req.StoryPoints is < 0) return ServiceResult<TaskItem>.Validation("StoryPoints must be >= 0.");
+
             if (req.Title is not null) task.Title = req.Title.Trim();
             if (req.Description is not null) task.Description = req.Description;
             if (req.CategoryId is not null) task.CategoryId = req.CategoryId;

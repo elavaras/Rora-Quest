@@ -156,6 +156,121 @@ public class TaskEffortTrackingTests
         Assert.Null(result.Value.ActualHours);
     }
 
+    // -----------------------------------------------------------------------
+    // AC-5: zero is a valid effort value
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void UpdateTask_ZeroEstimatedHours_IsAccepted()
+    {
+        var svc = CreateService();
+        var created = svc.CreateTask("user1", MinimalCreateRequest());
+
+        var req = new UpdateTaskRequest(
+            Title: null,
+            Description: null,
+            CategoryId: null,
+            SubCategoryId: null,
+            PlannedWeekStart: null,
+            PlannedDate: null,
+            DueDate: null,
+            StartAt: null,
+            EndAt: null,
+            Priority: null,
+            IfMatchVersion: null,
+            EstimatedHours: 0m);
+
+        var result = svc.UpdateTask("user1", created.Id, req);
+
+        Assert.Equal(200, result.StatusCode);
+        Assert.Equal(0m, result.Value!.EstimatedHours);
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-7: negative effort values must be rejected
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void UpdateTask_NegativeEstimatedHours_ReturnsValidationError()
+    {
+        var svc = CreateService();
+        var created = svc.CreateTask("user1", MinimalCreateRequest());
+
+        var req = new UpdateTaskRequest(
+            Title: null,
+            Description: null,
+            CategoryId: null,
+            SubCategoryId: null,
+            PlannedWeekStart: null,
+            PlannedDate: null,
+            DueDate: null,
+            StartAt: null,
+            EndAt: null,
+            Priority: null,
+            IfMatchVersion: null,
+            EstimatedHours: -1m);
+
+        var result = svc.UpdateTask("user1", created.Id, req);
+
+        Assert.Equal(400, result.StatusCode);
+        Assert.NotNull(result.Error);
+        Assert.Contains("EstimatedHours", result.Error);
+    }
+
+    [Fact]
+    public void UpdateTask_NegativeActualHours_ReturnsValidationError()
+    {
+        var svc = CreateService();
+        var created = svc.CreateTask("user1", MinimalCreateRequest());
+
+        var req = new UpdateTaskRequest(
+            Title: null,
+            Description: null,
+            CategoryId: null,
+            SubCategoryId: null,
+            PlannedWeekStart: null,
+            PlannedDate: null,
+            DueDate: null,
+            StartAt: null,
+            EndAt: null,
+            Priority: null,
+            IfMatchVersion: null,
+            ActualHours: -0.5m);
+
+        var result = svc.UpdateTask("user1", created.Id, req);
+
+        Assert.Equal(400, result.StatusCode);
+        Assert.NotNull(result.Error);
+        Assert.Contains("ActualHours", result.Error);
+    }
+
+    [Fact]
+    public void UpdateTask_NegativeStoryPoints_ReturnsValidationError()
+    {
+        var svc = CreateService();
+        var created = svc.CreateTask("user1", MinimalCreateRequest());
+
+        var req = new UpdateTaskRequest(
+            Title: null,
+            Description: null,
+            CategoryId: null,
+            SubCategoryId: null,
+            PlannedWeekStart: null,
+            PlannedDate: null,
+            DueDate: null,
+            StartAt: null,
+            EndAt: null,
+            Priority: null,
+            IfMatchVersion: null,
+            StoryPoints: -3);
+
+        var result = svc.UpdateTask("user1", created.Id, req);
+
+        Assert.Equal(400, result.StatusCode);
+        Assert.NotNull(result.Error);
+        Assert.Contains("StoryPoints", result.Error);
+    }
+
     [Fact]
     public void UpdateTask_NullEffortFields_LeavesExistingValuesUnchanged()
     {
