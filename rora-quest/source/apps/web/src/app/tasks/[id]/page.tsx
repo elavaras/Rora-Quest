@@ -38,6 +38,9 @@ type TaskItem = {
   logicNotes?: string | null;
   algorithmNotes?: string | null;
   diagramContent?: string | null;
+  estimatedHours?: number | null;
+  actualHours?: number | null;
+  storyPoints?: number | null;
   subSteps: SubStep[];
   links?: ReferenceLink[];
   assets?: TaskAsset[];
@@ -96,6 +99,9 @@ export default function TaskDetailPage({ params }: Props) {
   const [linkLabel, setLinkLabel] = useState("");
   const [addingLink, setAddingLink] = useState(false);
   const [uploadingDiagram, setUploadingDiagram] = useState(false);
+  const [estimatedHours, setEstimatedHours] = useState<string>("");
+  const [actualHours, setActualHours] = useState<string>("");
+  const [storyPoints, setStoryPoints] = useState<string>("");
   const [removingAssetId, setRemovingAssetId] = useState<string | null>(null);
   const [opStatus, setOpStatus] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(
     null
@@ -122,6 +128,9 @@ export default function TaskDetailPage({ params }: Props) {
     setLogicNotes(nextTask.logicNotes ?? "");
     setAlgorithmNotes(nextTask.algorithmNotes ?? "");
     setDiagramContent(nextTask.diagramContent ?? "");
+    setEstimatedHours(nextTask.estimatedHours != null ? String(nextTask.estimatedHours) : "");
+    setActualHours(nextTask.actualHours != null ? String(nextTask.actualHours) : "");
+    setStoryPoints(nextTask.storyPoints != null ? String(nextTask.storyPoints) : "");
   }, []);
 
   const load = useCallback(async () => {
@@ -173,7 +182,10 @@ export default function TaskDetailPage({ params }: Props) {
           questionAndReasoning,
           logicNotes,
           algorithmNotes,
-          diagramContent
+          diagramContent,
+          estimatedHours: estimatedHours !== "" ? parseFloat(estimatedHours) : null,
+          actualHours: actualHours !== "" ? parseFloat(actualHours) : null,
+          storyPoints: storyPoints !== "" ? parseInt(storyPoints, 10) : null
         })
       });
       applyTaskToView(updated);
@@ -500,6 +512,56 @@ export default function TaskDetailPage({ params }: Props) {
               <div className="row" style={{ marginTop: "0.75rem" }}>
                 <button disabled={addingLink || !linkUrl.trim()} onClick={addPracticeLink}>
                   {addingLink ? "Adding…" : "Add Practice Link"}
+                </button>
+              </div>
+              <h3 style={{ marginTop: "1rem" }}>Effort Tracking</h3>
+              <div className="grid-2" style={{ marginTop: "0.5rem" }}>
+                <div>
+                  <label className="field-label" htmlFor="estimated-hours">
+                    Estimated Hours
+                  </label>
+                  <input
+                    id="estimated-hours"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    placeholder="e.g. 2"
+                    value={estimatedHours}
+                    onChange={(e) => setEstimatedHours(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="actual-hours">
+                    Actual Hours
+                  </label>
+                  <input
+                    id="actual-hours"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    placeholder="e.g. 1.5"
+                    value={actualHours}
+                    onChange={(e) => setActualHours(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div style={{ marginTop: "0.5rem" }}>
+                <label className="field-label" htmlFor="story-points">
+                  Story Points
+                </label>
+                <input
+                  id="story-points"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="e.g. 3"
+                  value={storyPoints}
+                  onChange={(e) => setStoryPoints(e.target.value)}
+                />
+              </div>
+              <div className="row" style={{ marginTop: "0.75rem" }}>
+                <button disabled={savingMeta} onClick={saveMeta}>
+                  {savingMeta ? "Saving…" : "Save Effort"}
                 </button>
               </div>
             </div>

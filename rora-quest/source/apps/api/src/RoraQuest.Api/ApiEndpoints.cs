@@ -926,6 +926,9 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 AssignedTo = req.AssignedTo ?? userId,
                 Pattern = req.Pattern,
                 Difficulty = req.Difficulty,
+                EstimatedHours = req.EstimatedHours,
+                ActualHours = req.ActualHours,
+                StoryPoints = req.StoryPoints,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
@@ -1019,6 +1022,9 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             if (req.LogicNotes is not null) task.LogicNotes = req.LogicNotes;
             if (req.AlgorithmNotes is not null) task.AlgorithmNotes = req.AlgorithmNotes;
             if (req.DiagramContent is not null) task.DiagramContent = req.DiagramContent;
+            if (req.EstimatedHours is not null) task.EstimatedHours = req.EstimatedHours;
+            if (req.ActualHours is not null) task.ActualHours = req.ActualHours;
+            if (req.StoryPoints is not null) task.StoryPoints = req.StoryPoints;
             task.UpdatedAt = DateTimeOffset.UtcNow;
             task.RowVersion++;
             store.Save(userId, user);
@@ -1853,6 +1859,9 @@ public sealed class TaskItem
     public string? LogicNotes { get; set; }
     public string? AlgorithmNotes { get; set; }
     public string? DiagramContent { get; set; }
+    public decimal? EstimatedHours { get; set; }
+    public decimal? ActualHours { get; set; }
+    public int? StoryPoints { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public int RowVersion { get; set; } = 1;
@@ -2106,7 +2115,10 @@ public sealed record CreateTaskRequest(
     TaskStatus? Status,
     string? AssignedTo,
     string? Pattern = null,
-    Difficulty? Difficulty = null);
+    Difficulty? Difficulty = null,
+    decimal? EstimatedHours = null,
+    decimal? ActualHours = null,
+    int? StoryPoints = null);
 
 public sealed record UpdateTaskRequest(
     string? Title,
@@ -2125,7 +2137,10 @@ public sealed record UpdateTaskRequest(
     string? QuestionAndReasoning = null,
     string? LogicNotes = null,
     string? AlgorithmNotes = null,
-    string? DiagramContent = null);
+    string? DiagramContent = null,
+    decimal? EstimatedHours = null,
+    decimal? ActualHours = null,
+    int? StoryPoints = null);
 
 public sealed record UpdateTaskStatusRequest(TaskStatus Status, bool OverrideIncompleteSubsteps, int? IfMatchVersion);
 public sealed record BulkDeleteTasksRequest(List<Guid>? TaskIds);
