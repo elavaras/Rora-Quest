@@ -12,6 +12,7 @@ type TimelineItem = {
   ProgressPercent?: number;
 };
 type TimelineReport = { items: TimelineItem[] };
+type WeekSummary = { weekStart: string; totalActualHours: number };
 
 function ymd(date: Date): string {
   const y = date.getFullYear();
@@ -103,6 +104,7 @@ export default function DashboardPage() {
   const [progress, setProgress] = useState<ProgressReport | null>(null);
   const [scorecard, setScorecard] = useState<Scorecard | null>(null);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [weekSummary, setWeekSummary] = useState<WeekSummary | null>(null);
 
   const handleFromChange = (value: string) => {
     if (rangeType === "Weekly") {
@@ -139,15 +141,24 @@ export default function DashboardPage() {
       setError(null);
       try {
         const qs = new URLSearchParams({ from, to }).toString();
-        const [progressData, scoreData, timelineData] = await Promise.all([
+        const [progressResult, scoreResult, timelineResult, weekSummaryResult] = await Promise.allSettled([
           apiCall<ProgressReport>(`/api/reports/progress?${qs}`),
           apiCall<Scorecard>(`/api/scorecard?${qs}`),
-          apiCall<TimelineReport>(`/api/reports/timeline?${qs}`)
+          apiCall<TimelineReport>(`/api/reports/timeline?${qs}`),
+          apiCall<WeekSummary>(`/api/tasks/week-summary?weekStart=${weeklyFrom}`)
         ]);
         if (!alive) return;
-        setProgress(progressData);
-        setScorecard(scoreData);
-        setTimeline(timelineData.items ?? []);
+        if (progressResult.status === "fulfilled") setProgress(progressResult.value);
+        if (scoreResult.status === "fulfilled") setScorecard(scoreResult.value);
+        if (timelineResult.status === "fulfilled") setTimeline(timelineResult.value.items ?? []);
+        if (weekSummaryResult.status === "fulfilled") setWeekSummary(weekSummaryResult.value);
+        // Surface the first error from required calls (progress/score/timeline); ignore weekSummary failures
+        const firstError = [progressResult, scoreResult, timelineResult].find(
+          (r) => r.status === "rejected"
+        ) as PromiseRejectedResult | undefined;
+        if (firstError) {
+          setError(firstError.reason instanceof Error ? firstError.reason.message : "Failed to load dashboard metrics.");
+        }
       } catch (err) {
         if (!alive) return;
         setError(err instanceof Error ? err.message : "Failed to load dashboard metrics.");
@@ -159,7 +170,7 @@ export default function DashboardPage() {
     return () => {
       alive = false;
     };
-  }, [from, to]);
+  }, [from, to, weeklyFrom]);
 
   const completionRate = pct(scorecard?.completionRatePercent ?? 0);
   const avgProgress = pct(progress?.avgProgressPercent ?? 0);
@@ -215,7 +226,7 @@ export default function DashboardPage() {
       {error && <div className="card error-text">{error}</div>}
       {loading && <div className="card">Loading dashboard metrics…</div>}
 
-      <div className="grid-3">
+      <div className="grid-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
         <div className="card">
           <h3>Planned Tasks</h3>
           <p>{progress?.plannedTasks ?? 0}</p>
@@ -227,6 +238,12 @@ export default function DashboardPage() {
         <div className="card dashboard-metric-card">
           <h3>Avg Progress</h3>
           <DonutChart value={avgProgress} color="#059669" />
+        </div>
+        <div className="card">
+          <h3>Actual Hours (This Week)</h3>
+          <p style={{ fontSize: "1.5rem", fontWeight: 600 }}>
+            {weekSummary !== null ? `${weekSummary.totalActualHours.toFixed(1)}h` : "—"}
+          </p>
         </div>
       </div>
 

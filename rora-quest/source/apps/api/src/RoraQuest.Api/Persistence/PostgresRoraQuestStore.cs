@@ -74,6 +74,7 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
             @"SELECT id, user_id, title, description, category_id, sub_category_id, planned_week_start,
                      planned_date, pattern, difficulty, assigned_to, priority, status, due_date, start_at, end_at, calendar_event_id,
                      reminder_at, question_and_reasoning, logic_notes, algorithm_notes, diagram_content,
+                     estimated_hours, actual_hours, story_points,
                      created_at, updated_at, row_version
               FROM task_items WHERE user_id = @u", arg))
         {
@@ -101,6 +102,9 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                 LogicNotes = t.LogicNotes,
                 AlgorithmNotes = t.AlgorithmNotes,
                 DiagramContent = t.DiagramContent,
+                EstimatedHours = t.EstimatedHours,
+                ActualHours = t.ActualHours,
+                StoryPoints = t.StoryPoints,
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt,
                 RowVersion = t.RowVersion
@@ -555,11 +559,13 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                     (id, user_id, title, description, category_id, sub_category_id, planned_week_start,
                      planned_date, pattern, difficulty, assigned_to, priority, status, due_date, start_at, end_at, calendar_event_id,
                      reminder_at, question_and_reasoning, logic_notes, algorithm_notes, diagram_content,
+                     estimated_hours, actual_hours, story_points,
                      created_at, updated_at, row_version)
                   VALUES
                     (@id, @user, @title, @description, @category, @sub, @week,
                      @plannedDate, @pattern, @difficulty, @assigned, @priority, @status, @due, @start, @end, @calendar,
                      @reminder, @qr, @logic, @algo, @diagram,
+                     @estimatedHours, @actualHours, @storyPoints,
                      @created, @updated, @row)",
                 p =>
                 {
@@ -585,6 +591,9 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                     p.AddWithValue("logic", (object?)t.LogicNotes ?? DBNull.Value);
                     p.AddWithValue("algo", (object?)t.AlgorithmNotes ?? DBNull.Value);
                     p.AddWithValue("diagram", (object?)t.DiagramContent ?? DBNull.Value);
+                    p.AddWithValue("estimatedHours", (object?)t.EstimatedHours ?? DBNull.Value);
+                    p.AddWithValue("actualHours", (object?)t.ActualHours ?? DBNull.Value);
+                    p.AddWithValue("storyPoints", (object?)t.StoryPoints ?? DBNull.Value);
                     p.AddWithValue("created", t.CreatedAt);
                     p.AddWithValue("updated", t.UpdatedAt);
                     p.AddWithValue("row", t.RowVersion < 1 ? 1 : t.RowVersion);
@@ -904,6 +913,9 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
         public string? LogicNotes { get; set; }
         public string? AlgorithmNotes { get; set; }
         public string? DiagramContent { get; set; }
+        public decimal? EstimatedHours { get; set; }
+        public decimal? ActualHours { get; set; }
+        public int? StoryPoints { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }
         public int RowVersion { get; set; }

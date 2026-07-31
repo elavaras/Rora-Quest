@@ -147,6 +147,15 @@ public static class ApiEndpoints
             return Results.Ok(svc.CreateTask(UserScope.GetUserId(http), req));
         });
 
+        // Must be registered before /{taskId:guid} to prevent route ambiguity
+        group.MapGet("/week-summary", (HttpContext http, RoraQuestService svc) =>
+        {
+            var weekStartStr = http.Request.Query["weekStart"].FirstOrDefault();
+            if (!DateOnly.TryParse(weekStartStr, out var weekStart))
+                return Results.BadRequest("weekStart query parameter is required (yyyy-MM-dd).");
+            return Results.Ok(svc.GetWeekActualHoursSummary(UserScope.GetUserId(http), weekStart));
+        });
+
         group.MapGet("/{taskId:guid}", (Guid taskId, RoraQuestService svc, HttpContext http) =>
         {
             var task = svc.GetTask(UserScope.GetUserId(http), taskId);
@@ -867,6 +876,22 @@ public sealed class RoraQuestService(IRoraQuestStore store)
         }
     }
 
+    public WeekActualHoursSummary GetWeekActualHoursSummary(string userId, DateOnly weekStart)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            var weekEnd = weekStart.AddDays(6);
+            var total = user.Tasks.Values
+                .Where(t =>
+                    t.PlannedWeekStart == weekStart
+                    || (t.PlannedDate is not null && t.PlannedDate.Value >= weekStart && t.PlannedDate.Value <= weekEnd))
+                .Where(t => t.ActualHours is not null)
+                .Sum(t => t.ActualHours!.Value);
+            return new WeekActualHoursSummary(weekStart, total);
+        }
+    }
+
     // Self-heal exact re-import duplicates: tasks sharing the same category, sub-category,
     // title AND planned date are artifacts of committing the same checklist more than once.
     // Keep the most-progressed copy (most completed sub-step weight, then earliest created)
@@ -926,6 +951,9 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 AssignedTo = req.AssignedTo ?? userId,
                 Pattern = req.Pattern,
                 Difficulty = req.Difficulty,
+                EstimatedHours = req.EstimatedHours,
+                ActualHours = req.ActualHours,
+                StoryPoints = req.StoryPoints,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
@@ -998,6 +1026,11 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskItem>.NotFound();
             if (req.IfMatchVersion is not null && req.IfMatchVersion != task.RowVersion) return ServiceResult<TaskItem>.Conflict("Row version mismatch.");
 
+            // Non-negative guards for effort fields (mirrors DB CHECK constraints)
+            if (req.EstimatedHours is < 0) return ServiceResult<TaskItem>.Validation("EstimatedHours must be >= 0.");
+            if (req.ActualHours is < 0) return ServiceResult<TaskItem>.Validation("ActualHours must be >= 0.");
+            if (req.StoryPoints is < 0) return ServiceResult<TaskItem>.Validation("StoryPoints must be >= 0.");
+
             if (req.Title is not null) task.Title = req.Title.Trim();
             if (req.Description is not null) task.Description = req.Description;
             if (req.CategoryId is not null) task.CategoryId = req.CategoryId;
@@ -1019,6 +1052,9 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             if (req.LogicNotes is not null) task.LogicNotes = req.LogicNotes;
             if (req.AlgorithmNotes is not null) task.AlgorithmNotes = req.AlgorithmNotes;
             if (req.DiagramContent is not null) task.DiagramContent = req.DiagramContent;
+            if (req.EstimatedHours is not null) task.EstimatedHours = req.EstimatedHours;
+            if (req.ActualHours is not null) task.ActualHours = req.ActualHours;
+            if (req.StoryPoints is not null) task.StoryPoints = req.StoryPoints;
             task.UpdatedAt = DateTimeOffset.UtcNow;
             task.RowVersion++;
             store.Save(userId, user);
@@ -1853,6 +1889,9 @@ public sealed class TaskItem
     public string? LogicNotes { get; set; }
     public string? AlgorithmNotes { get; set; }
     public string? DiagramContent { get; set; }
+    public decimal? EstimatedHours { get; set; }
+    public decimal? ActualHours { get; set; }
+    public int? StoryPoints { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public int RowVersion { get; set; } = 1;
@@ -2106,7 +2145,10 @@ public sealed record CreateTaskRequest(
     TaskStatus? Status,
     string? AssignedTo,
     string? Pattern = null,
-    Difficulty? Difficulty = null);
+    Difficulty? Difficulty = null,
+    decimal? EstimatedHours = null,
+    decimal? ActualHours = null,
+    int? StoryPoints = null);
 
 public sealed record UpdateTaskRequest(
     string? Title,
@@ -2125,7 +2167,10 @@ public sealed record UpdateTaskRequest(
     string? QuestionAndReasoning = null,
     string? LogicNotes = null,
     string? AlgorithmNotes = null,
-    string? DiagramContent = null);
+    string? DiagramContent = null,
+    decimal? EstimatedHours = null,
+    decimal? ActualHours = null,
+    int? StoryPoints = null);
 
 public sealed record UpdateTaskStatusRequest(TaskStatus Status, bool OverrideIncompleteSubsteps, int? IfMatchVersion);
 public sealed record BulkDeleteTasksRequest(List<Guid>? TaskIds);
@@ -2145,3 +2190,4 @@ public sealed record SyncBatchRequest(List<Guid> TaskIds);
 public sealed record UpdateNotificationSettingsRequest(TimeOnly? DailyDigestTime, TimeOnly? EveningReminderTime, string? TeamsDestination);
 public sealed record ConnectMicrosoftRequest(string Provider, string AccountIdentifier);
 public sealed record MicrosoftCallbackRequest(string Provider, string Code);
+public sealed record WeekActualHoursSummary(DateOnly WeekStart, decimal TotalActualHours);
