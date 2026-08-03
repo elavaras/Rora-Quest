@@ -164,6 +164,35 @@ export default function TaskDetailPage({ params }: Props) {
     setStatusDraft(nextTask.status);
   }, []);
 
+  const normalizeDecimalInput = (value: string): number | null | undefined => {
+    if (value.trim() === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+  };
+
+  const normalizeIntegerInput = (value: string): number | null | undefined => {
+    if (value.trim() === "") return null;
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+  };
+
+  const hasInvalidDetailInputs =
+    normalizeDecimalInput(estimatedHours) === undefined ||
+    normalizeDecimalInput(actualHours) === undefined ||
+    normalizeIntegerInput(storyPoints) === undefined;
+
+  const hasPendingDetailChanges = !!task && (
+    (pattern.trim() || null) !== (task.pattern ?? null) ||
+    (difficulty || null) !== (task.difficulty ?? null) ||
+    questionAndReasoning !== (task.questionAndReasoning ?? "") ||
+    logicNotes !== (task.logicNotes ?? "") ||
+    algorithmNotes !== (task.algorithmNotes ?? "") ||
+    diagramContent !== (task.diagramContent ?? "") ||
+    normalizeDecimalInput(estimatedHours) !== (task.estimatedHours ?? null) ||
+    normalizeDecimalInput(actualHours) !== (task.actualHours ?? null) ||
+    normalizeIntegerInput(storyPoints) !== (task.storyPoints ?? null)
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -224,9 +253,9 @@ export default function TaskDetailPage({ params }: Props) {
           logicNotes,
           algorithmNotes,
           diagramContent,
-          estimatedHours: estimatedHours !== "" ? parseFloat(estimatedHours) : null,
-          actualHours: actualHours !== "" ? parseFloat(actualHours) : null,
-          storyPoints: storyPoints !== "" ? parseInt(storyPoints, 10) : null
+          estimatedHours: normalizeDecimalInput(estimatedHours),
+          actualHours: normalizeDecimalInput(actualHours),
+          storyPoints: normalizeIntegerInput(storyPoints)
         })
       });
       applyTaskToView(updated);
@@ -239,8 +268,8 @@ export default function TaskDetailPage({ params }: Props) {
     }
   };
 
-  const updateTaskStatus = async () => {
-    if (!task || statusDraft === task.status) return;
+  const updateTaskStatus = async (nextStatus: TaskItem["status"]) => {
+    if (!task || nextStatus === task.status) return;
     setSavingStatus(true);
     setError(null);
     setStatus("info", "Updating task status...");
@@ -248,7 +277,7 @@ export default function TaskDetailPage({ params }: Props) {
       const updated = await apiCall<TaskItem>(`/api/tasks/${id}/status`, {
         method: "PATCH",
         body: JSON.stringify({
-          status: statusDraft,
+          status: nextStatus,
           overrideIncompleteSubsteps: false
         })
       });
@@ -422,7 +451,11 @@ export default function TaskDetailPage({ params }: Props) {
               <select
                 aria-label="Task status"
                 value={statusDraft}
-                onChange={(event) => setStatusDraft(event.target.value as TaskItem["status"])}
+                onChange={(event) => {
+                  const nextStatus = event.target.value as TaskItem["status"];
+                  setStatusDraft(nextStatus);
+                  void updateTaskStatus(nextStatus);
+                }}
                 disabled={isDsaLocked || savingStatus}
               >
                 {TASK_STATUSES.map((status) => (
@@ -431,16 +464,15 @@ export default function TaskDetailPage({ params }: Props) {
                   </option>
                 ))}
               </select>
-              <button
-                onClick={updateTaskStatus}
-                disabled={isDsaLocked || savingStatus || statusDraft === task.status}
-              >
-                {savingStatus ? "Updating…" : "Update Status"}
-              </button>
             </div>
             {isDsaLocked && (
               <p className="muted" style={{ marginTop: "0.5rem" }}>
                 DSA tasks are system-managed. Manual status and subtask updates are disabled.
+              </p>
+            )}
+            {!isDsaLocked && (
+              <p className="muted" style={{ marginTop: "0.5rem" }}>
+                Status changes save automatically.
               </p>
             )}
             <div className="progress-bar">
@@ -475,11 +507,6 @@ export default function TaskDetailPage({ params }: Props) {
                   </option>
                 ))}
               </select>
-              <div className="row" style={{ marginTop: "0.75rem" }}>
-                <button disabled={savingMeta} onClick={saveMeta}>
-                  {savingMeta ? "Saving…" : "Save"}
-                </button>
-              </div>
               <h3 style={{ marginTop: "1rem" }}>Question &amp; Reasoning</h3>
               <textarea
                 value={questionAndReasoning}
@@ -653,9 +680,9 @@ export default function TaskDetailPage({ params }: Props) {
                   onChange={(e) => setStoryPoints(e.target.value)}
                 />
               </div>
-              <div className="row" style={{ marginTop: "0.75rem" }}>
-                <button disabled={savingMeta} onClick={saveMeta}>
-                  {savingMeta ? "Saving…" : "Save Effort"}
+              <div className="row" style={{ marginTop: "1rem" }}>
+                <button disabled={savingMeta || hasInvalidDetailInputs || !hasPendingDetailChanges} onClick={saveMeta}>
+                  {savingMeta ? "Saving…" : "Save Task Details"}
                 </button>
               </div>
             </div>
