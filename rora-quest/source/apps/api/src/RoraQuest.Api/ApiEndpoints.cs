@@ -1146,9 +1146,9 @@ public sealed class RoraQuestService(IRoraQuestStore store)
             var sub = task.SubSteps.FirstOrDefault(x => x.Id == subStepId);
             if (sub is null) return ServiceResult<TaskSubStep>.NotFound();
             if (req.IfMatchVersion is not null && req.IfMatchVersion != sub.RowVersion) return ServiceResult<TaskSubStep>.Conflict("Substep row version mismatch.");
-            if (req.IsDone is not null && IsDsaTask(user, task))
+            if (req.Title is not null && IsDsaTask(user, task))
             {
-                return ServiceResult<TaskSubStep>.Validation("Manual subtask status updates are disabled for the DSA category.");
+                return ServiceResult<TaskSubStep>.Validation("Manual subtask title updates are disabled for the DSA category.");
             }
 
             if (req.Title is not null) sub.Title = req.Title.Trim();

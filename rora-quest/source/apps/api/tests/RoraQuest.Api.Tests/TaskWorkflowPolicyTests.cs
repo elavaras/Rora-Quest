@@ -61,7 +61,7 @@ public class TaskWorkflowPolicyTests
     }
 
     [Fact]
-    public void DsaTask_ManualStatusAndSubtaskUpdates_AreBlocked()
+    public void DsaTask_ManualStatusAndSubtaskStructureUpdates_AreBlocked_ButCompletionToggleIsAllowed()
     {
         var svc = CreateService();
         var import = svc.CreateChecklistImport(
@@ -81,10 +81,17 @@ public class TaskWorkflowPolicyTests
             dsaTask.Id,
             dsaTask.SubSteps[0].Id,
             new UpdateSubstepRequest(Title: null, IsDone: true, IfMatchVersion: null));
+        var renameSubstepResult = svc.UpdateSubstep(
+            "user1",
+            dsaTask.Id,
+            dsaTask.SubSteps[0].Id,
+            new UpdateSubstepRequest(Title: "Renamed step", IsDone: null, IfMatchVersion: null));
 
         Assert.Equal(400, statusResult.StatusCode);
         Assert.Equal(400, createSubstepResult.StatusCode);
-        Assert.Equal(400, updateSubstepResult.StatusCode);
+        Assert.Equal(200, updateSubstepResult.StatusCode);
+        Assert.True(updateSubstepResult.Value!.IsDone);
+        Assert.Equal(400, renameSubstepResult.StatusCode);
     }
 
     [Fact]
