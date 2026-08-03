@@ -629,7 +629,10 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                     CreatedAt = now,
                     UpdatedAt = now
                 };
-                SeedStandardSubSteps(task);
+                if (IsDsaFlowCategory(user, task.CategoryId, task.SubCategoryId))
+                {
+                    SeedStandardSubSteps(task);
+                }
                 user.Tasks[task.Id] = task;
                 created.Add(task);
             }
@@ -969,7 +972,10 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
-            SeedStandardSubSteps(task);
+            if (IsDsaFlowCategory(user, task.CategoryId, task.SubCategoryId))
+            {
+                SeedStandardSubSteps(task);
+            }
             user.Tasks[task.Id] = task;
             store.Save(userId, user);
             return task;
