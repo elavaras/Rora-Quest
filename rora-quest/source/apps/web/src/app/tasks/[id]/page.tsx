@@ -225,10 +225,6 @@ export default function TaskDetailPage({ params }: Props) {
 
   const toggleSubStep = async (sub: SubStep) => {
     if (!task) return;
-    if (isDsaLocked) {
-      setStatus("error", "DSA subtasks are locked and cannot be updated manually.");
-      return;
-    }
     // optimistic update
     const next = task.subSteps.map((s) =>
       s.id === sub.id ? { ...s, isDone: !s.isDone } : s
@@ -534,7 +530,7 @@ export default function TaskDetailPage({ params }: Props) {
             </div>
             {isDsaLocked && (
               <p className="muted" style={{ marginTop: "0.5rem" }}>
-                DSA tasks are system-managed. Manual status and subtask updates are disabled.
+                DSA tasks are system-managed. Manual task status and sub-step structure updates are disabled.
               </p>
             )}
             {!isDsaLocked && (
@@ -802,7 +798,6 @@ export default function TaskDetailPage({ params }: Props) {
                     <input
                       type="checkbox"
                       checked={s.isDone}
-                      disabled={isDsaLocked}
                       onChange={() => toggleSubStep(s)}
                     />
                     <span className={s.isDone ? "substep-done" : ""}>{s.title}</span>
