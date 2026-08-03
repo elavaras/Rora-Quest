@@ -439,14 +439,14 @@ export default function TaskDetailPage({ params }: Props) {
           <div className="card">
             <div className="detail-title-row">
               <h2>{task.title}</h2>
-              <div className="row" style={{ marginTop: "1rem" }}>
+              <div className="row" style={{ gap: "0.5rem" }}>
                 <button disabled={savingMeta || hasInvalidDetailInputs || !hasPendingDetailChanges} onClick={saveMeta}>
                   {savingMeta ? "Saving…" : "Save Task Details"}
                 </button>
+                <button className="danger" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? "Deleting…" : "Delete Task"}
+                </button>
               </div>
-              <button className="danger" onClick={handleDelete} disabled={deleting}>
-                {deleting ? "Deleting…" : "Delete Task"}
-              </button>
             </div>
             <div className="t-meta">
               <span className={`chip ${task.status.toLowerCase()}`}>{task.status}</span> ·{" "}
