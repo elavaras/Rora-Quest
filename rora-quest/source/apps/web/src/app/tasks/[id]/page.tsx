@@ -133,6 +133,10 @@ export default function TaskDetailPage({ params }: Props) {
   const [statusDraft, setStatusDraft] = useState<TaskItem["status"]>("Todo");
   const [categories, setCategories] = useState<Category[]>([]);
   const [removingAssetId, setRemovingAssetId] = useState<string | null>(null);
+  const [subStepTitle, setSubStepTitle] = useState("");
+  const [subStepWeight, setSubStepWeight] = useState("1");
+  const [addingSubStep, setAddingSubStep] = useState(false);
+  const [removingSubStepId, setRemovingSubStepId] = useState<string | null>(null);
   const [opStatus, setOpStatus] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(
     null
   );
@@ -180,6 +184,8 @@ export default function TaskDetailPage({ params }: Props) {
     normalizeDecimalInput(estimatedHours) === undefined ||
     normalizeDecimalInput(actualHours) === undefined ||
     normalizeIntegerInput(storyPoints) === undefined;
+  const normalizedSubStepWeight = normalizeIntegerInput(subStepWeight);
+  const hasInvalidSubStepWeight = normalizedSubStepWeight === undefined;
 
   const hasPendingDetailChanges = !!task && (
     (pattern.trim() || null) !== (task.pattern ?? null) ||
@@ -402,6 +408,62 @@ export default function TaskDetailPage({ params }: Props) {
       setStatus("error", "Failed to remove diagram image.");
     } finally {
       setRemovingAssetId(null);
+    }
+  };
+
+  const createSubStep = async () => {
+    if (!task || isDsaLocked || !subStepTitle.trim() || hasInvalidSubStepWeight) return;
+    setAddingSubStep(true);
+    setError(null);
+    setStatus("info", "Creating sub-step...");
+    try {
+      const created = await apiCall<SubStep>(`/api/tasks/${id}/substeps`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: subStepTitle.trim(),
+          weight: normalizedSubStepWeight ?? 0
+        })
+      });
+      setTask((current) =>
+        current
+          ? {
+              ...current,
+              subSteps: [...(current.subSteps ?? []), created].sort((a, b) => a.orderIndex - b.orderIndex)
+            }
+          : current
+      );
+      setSubStepTitle("");
+      setSubStepWeight("1");
+      setStatus("success", "Sub-step created.", 1800);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create sub-step.");
+      setStatus("error", "Failed to create sub-step.");
+    } finally {
+      setAddingSubStep(false);
+    }
+  };
+
+  const removeSubStep = async (subStepId: string) => {
+    if (!task || isDsaLocked) return;
+    setRemovingSubStepId(subStepId);
+    setError(null);
+    setStatus("info", "Removing sub-step...");
+    try {
+      await apiCall<void>(`/api/tasks/${id}/substeps/${subStepId}`, { method: "DELETE" });
+      setTask((current) =>
+        current
+          ? {
+              ...current,
+              subSteps: (current.subSteps ?? []).filter((subStep) => subStep.id !== subStepId)
+            }
+          : current
+      );
+      setStatus("success", "Sub-step removed.", 1800);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove sub-step.");
+      setStatus("error", "Failed to remove sub-step.");
+    } finally {
+      setRemovingSubStepId(null);
     }
   };
 
@@ -692,6 +754,47 @@ export default function TaskDetailPage({ params }: Props) {
             <h3>
               Sub-steps · {task.subSteps.filter((s) => s.isDone).length}/{task.subSteps.length}
             </h3>
+            <div className="grid-2" style={{ marginTop: "0.75rem" }}>
+              <div>
+                <label className="field-label" htmlFor="sub-step-title">
+                  New sub-step title
+                </label>
+                <input
+                  id="sub-step-title"
+                  placeholder="e.g., Draft solution approach"
+                  value={subStepTitle}
+                  onChange={(e) => setSubStepTitle(e.target.value)}
+                  disabled={isDsaLocked || addingSubStep}
+                />
+              </div>
+              <div>
+                <label className="field-label" htmlFor="sub-step-weight">
+                  Weight
+                </label>
+                <input
+                  id="sub-step-weight"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={subStepWeight}
+                  onChange={(e) => setSubStepWeight(e.target.value)}
+                  disabled={isDsaLocked || addingSubStep}
+                />
+              </div>
+            </div>
+            <div className="row" style={{ marginTop: "0.75rem" }}>
+              <button
+                disabled={isDsaLocked || addingSubStep || !subStepTitle.trim() || hasInvalidSubStepWeight}
+                onClick={createSubStep}
+              >
+                {addingSubStep ? "Creating…" : "Create Sub-step"}
+              </button>
+            </div>
+            {isDsaLocked && (
+              <p className="muted" style={{ marginTop: "0.5rem" }}>
+                Manual sub-step creation/removal is disabled for DSA tasks.
+              </p>
+            )}
             <ul className="substep-list">
               {task.subSteps.map((s) => (
                 <li key={s.id} className="substep-row">
@@ -704,7 +807,19 @@ export default function TaskDetailPage({ params }: Props) {
                     />
                     <span className={s.isDone ? "substep-done" : ""}>{s.title}</span>
                   </label>
-                  <span className="substep-weight">{s.weight} pts</span>
+                  <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+                    <span className="substep-weight">{s.weight} pts</span>
+                    {!isDsaLocked && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={removingSubStepId === s.id}
+                        onClick={() => void removeSubStep(s.id)}
+                      >
+                        {removingSubStepId === s.id ? "Removing…" : "Remove"}
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

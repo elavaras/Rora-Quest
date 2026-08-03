@@ -113,11 +113,18 @@ public class TaskWorkflowPolicyTests
     }
 
     [Fact]
-    public void NonDsaTask_DoesNotSeedDefaultSubtasks()
+    public void NonDsaTask_DoesNotSeedDefaultSubtasks_ButAllowsManualCreation()
     {
         var svc = CreateService();
         var task = svc.CreateTask("user1", MinimalCreateRequest());
 
         Assert.Empty(task.SubSteps);
+
+        var createSubstepResult = svc.CreateSubstep("user1", task.Id, new CreateSubstepRequest("Manual step", 3));
+
+        Assert.Equal(200, createSubstepResult.StatusCode);
+        var createdSubstep = Assert.IsType<TaskSubStep>(createSubstepResult.Value);
+        Assert.Equal("Manual step", createdSubstep.Title);
+        Assert.Equal(3, createdSubstep.Weight);
     }
 }
