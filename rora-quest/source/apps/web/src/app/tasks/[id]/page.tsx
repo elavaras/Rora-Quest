@@ -439,6 +439,11 @@ export default function TaskDetailPage({ params }: Props) {
           <div className="card">
             <div className="detail-title-row">
               <h2>{task.title}</h2>
+              <div className="row" style={{ marginTop: "1rem" }}>
+                <button disabled={savingMeta || hasInvalidDetailInputs || !hasPendingDetailChanges} onClick={saveMeta}>
+                  {savingMeta ? "Saving…" : "Save Task Details"}
+                </button>
+              </div>
               <button className="danger" onClick={handleDelete} disabled={deleting}>
                 {deleting ? "Deleting…" : "Delete Task"}
               </button>
@@ -679,11 +684,6 @@ export default function TaskDetailPage({ params }: Props) {
                   value={storyPoints}
                   onChange={(e) => setStoryPoints(e.target.value)}
                 />
-              </div>
-              <div className="row" style={{ marginTop: "1rem" }}>
-                <button disabled={savingMeta || hasInvalidDetailInputs || !hasPendingDetailChanges} onClick={saveMeta}>
-                  {savingMeta ? "Saving…" : "Save Task Details"}
-                </button>
               </div>
             </div>
           </div>
