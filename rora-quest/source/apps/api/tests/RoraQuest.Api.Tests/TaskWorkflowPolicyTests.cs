@@ -69,6 +69,7 @@ public class TaskWorkflowPolicyTests
             new BulkChecklistImportRequest("Week 1: Arrays\nTwo Sum", "DSA", null));
         _ = svc.CommitChecklistImport("user1", import.Id, null, null);
         var dsaTask = Assert.Single(svc.GetTasks("user1", new TaskQuery()));
+        Assert.NotEmpty(dsaTask.SubSteps);
 
         var statusResult = svc.UpdateTaskStatus(
             "user1",
@@ -91,21 +92,32 @@ public class TaskWorkflowPolicyTests
     {
         var svc = CreateService();
         var task = svc.CreateTask("user1", MinimalCreateRequest());
+        Assert.Empty(task.SubSteps);
 
         var statusResult = svc.UpdateTaskStatus(
             "user1",
             task.Id,
             new UpdateTaskStatusRequest(TaskStatus.InProgress, OverrideIncompleteSubsteps: false, IfMatchVersion: null));
         var createSubstepResult = svc.CreateSubstep("user1", task.Id, new CreateSubstepRequest("Extra step", 5));
+        var createdSubstep = Assert.IsType<TaskSubStep>(createSubstepResult.Value);
         var updateSubstepResult = svc.UpdateSubstep(
             "user1",
             task.Id,
-            task.SubSteps[0].Id,
+            createdSubstep.Id,
             new UpdateSubstepRequest(Title: null, IsDone: true, IfMatchVersion: null));
 
         Assert.Equal(200, statusResult.StatusCode);
         Assert.Equal(200, createSubstepResult.StatusCode);
         Assert.Equal(200, updateSubstepResult.StatusCode);
         Assert.True(updateSubstepResult.Value!.IsDone);
+    }
+
+    [Fact]
+    public void NonDsaTask_DoesNotSeedDefaultSubtasks()
+    {
+        var svc = CreateService();
+        var task = svc.CreateTask("user1", MinimalCreateRequest());
+
+        Assert.Empty(task.SubSteps);
     }
 }
