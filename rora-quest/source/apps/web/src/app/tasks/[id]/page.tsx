@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiAuthHeaders, getApiBaseUrl } from "../../lib/user-session";
 const DIFFICULTIES = ["Easy", "Medium", "Hard"] as const;
 const TASK_STATUSES = ["Todo", "InProgress", "Done", "Cancelled", "Skipped"] as const;
@@ -13,6 +13,8 @@ type SubStep = {
   title: string;
   isDone: boolean;
   orderIndex: number;
+  completedAt: string | null;
+  rowVersion: number;
   weight: number;
 };
 
@@ -156,7 +158,9 @@ export default function TaskDetailPage({ params }: Props) {
   const [subStepWeight, setSubStepWeight] = useState("1");
   const [addingSubStep, setAddingSubStep] = useState(false);
   const [removingSubStepId, setRemovingSubStepId] = useState<string | null>(null);
+  const [togglingSubStepId, setTogglingSubStepId] = useState<string | null>(null);
   const [expandedField, setExpandedField] = useState<ExpandableDetailField | null>(null);
+  const workflowMutationRef = useRef(false);
   const [opStatus, setOpStatus] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(
     null
   );
@@ -233,6 +237,15 @@ export default function TaskDetailPage({ params }: Props) {
     }
   }, [applyTaskToView, id, setStatus]);
 
+  const reconcileWorkflowState = useCallback(async () => {
+    const authoritativeTask = await apiCall<TaskItem>(`/api/tasks/${id}`);
+    const ordered = [...(authoritativeTask.subSteps ?? [])].sort(
+      (a, b) => a.orderIndex - b.orderIndex
+    );
+    setTask({ ...authoritativeTask, subSteps: ordered });
+    setStatusDraft(authoritativeTask.status);
+  }, [id]);
+
   useEffect(() => {
     load();
   }, [load]);
@@ -259,20 +272,53 @@ export default function TaskDetailPage({ params }: Props) {
   }, [expandedField]);
 
   const toggleSubStep = async (sub: SubStep) => {
-    if (!task) return;
-    // optimistic update
-    const next = task.subSteps.map((s) =>
-      s.id === sub.id ? { ...s, isDone: !s.isDone } : s
-    );
-    setTask({ ...task, subSteps: next });
+    if (!task || workflowMutationRef.current) return;
+    workflowMutationRef.current = true;
+    setTogglingSubStepId(sub.id);
+    setError(null);
     try {
-      await apiCall(`/api/tasks/${id}/substeps/${sub.id}`, {
+      const isDone = !sub.isDone;
+      const next = task.subSteps.map((s) =>
+        s.id === sub.id ? { ...s, isDone } : s
+      );
+      let status = task.status;
+      if (isDone && next.every((step) => step.isDone) && (status === "Todo" || status === "InProgress")) {
+        status = "Done";
+      } else if (!isDone && status === "Done") {
+        status = "InProgress";
+      }
+
+      setTask({ ...task, status, subSteps: next });
+      setStatusDraft(status);
+      const updatedSubStep = await apiCall<SubStep>(`/api/tasks/${id}/substeps/${sub.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ isDone: !sub.isDone })
+        body: JSON.stringify({ isDone, ifMatchVersion: sub.rowVersion })
       });
+      setTask((current) =>
+        current
+          ? {
+              ...current,
+              subSteps: current.subSteps.map((step) =>
+                step.id === updatedSubStep.id ? updatedSubStep : step
+              )
+            }
+          : current
+      );
+      await reconcileWorkflowState();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update sub-step.");
-      await load();
+      const message = err instanceof Error ? err.message : "Failed to update sub-step.";
+      try {
+        await reconcileWorkflowState();
+        setError(message);
+      } catch (reconcileError) {
+        const reconcileMessage =
+          reconcileError instanceof Error ? reconcileError.message : "Failed to reload task.";
+        setError(`${message} ${reconcileMessage}`);
+      }
+      setStatus("error", "Failed to update sub-step.");
+    } finally {
+      setTogglingSubStepId(null);
+      workflowMutationRef.current = false;
     }
   };
 
@@ -307,7 +353,10 @@ export default function TaskDetailPage({ params }: Props) {
 
   const updateTaskStatus = async (nextStatus: TaskItem["status"]) => {
     if (!task || nextStatus === task.status) return;
+    if (workflowMutationRef.current) return;
+    workflowMutationRef.current = true;
     setSavingStatus(true);
+    setStatusDraft(nextStatus);
     setError(null);
     setStatus("info", "Updating task status...");
     try {
@@ -326,6 +375,7 @@ export default function TaskDetailPage({ params }: Props) {
       setStatusDraft(task.status);
     } finally {
       setSavingStatus(false);
+      workflowMutationRef.current = false;
     }
   };
 
@@ -443,7 +493,14 @@ export default function TaskDetailPage({ params }: Props) {
   };
 
   const createSubStep = async () => {
-    if (!task || isDsaLocked || !subStepTitle.trim() || hasInvalidSubStepWeight) return;
+    if (
+      !task ||
+      isDsaLocked ||
+      !subStepTitle.trim() ||
+      hasInvalidSubStepWeight ||
+      workflowMutationRef.current
+    ) return;
+    workflowMutationRef.current = true;
     setAddingSubStep(true);
     setError(null);
     setStatus("info", "Creating sub-step...");
@@ -471,11 +528,13 @@ export default function TaskDetailPage({ params }: Props) {
       setStatus("error", "Failed to create sub-step.");
     } finally {
       setAddingSubStep(false);
+      workflowMutationRef.current = false;
     }
   };
 
   const removeSubStep = async (subStepId: string) => {
-    if (!task || isDsaLocked) return;
+    if (!task || isDsaLocked || workflowMutationRef.current) return;
+    workflowMutationRef.current = true;
     setRemovingSubStepId(subStepId);
     setError(null);
     setStatus("info", "Removing sub-step...");
@@ -495,6 +554,7 @@ export default function TaskDetailPage({ params }: Props) {
       setStatus("error", "Failed to remove sub-step.");
     } finally {
       setRemovingSubStepId(null);
+      workflowMutationRef.current = false;
     }
   };
 
@@ -600,10 +660,15 @@ export default function TaskDetailPage({ params }: Props) {
                 value={statusDraft}
                 onChange={(event) => {
                   const nextStatus = event.target.value as TaskItem["status"];
-                  setStatusDraft(nextStatus);
                   void updateTaskStatus(nextStatus);
                 }}
-                disabled={isDsaLocked || savingStatus}
+                disabled={
+                  isDsaLocked ||
+                  savingStatus ||
+                  togglingSubStepId !== null ||
+                  addingSubStep ||
+                  removingSubStepId !== null
+                }
               >
                 {TASK_STATUSES.map((status) => (
                   <option key={status} value={status}>
@@ -826,7 +891,13 @@ export default function TaskDetailPage({ params }: Props) {
                   placeholder="e.g., Draft solution approach"
                   value={subStepTitle}
                   onChange={(e) => setSubStepTitle(e.target.value)}
-                  disabled={isDsaLocked || addingSubStep}
+                  disabled={
+                    isDsaLocked ||
+                    addingSubStep ||
+                    savingStatus ||
+                    togglingSubStepId !== null ||
+                    removingSubStepId !== null
+                  }
                 />
               </div>
               <div>
@@ -840,13 +911,27 @@ export default function TaskDetailPage({ params }: Props) {
                   step="1"
                   value={subStepWeight}
                   onChange={(e) => setSubStepWeight(e.target.value)}
-                  disabled={isDsaLocked || addingSubStep}
+                  disabled={
+                    isDsaLocked ||
+                    addingSubStep ||
+                    savingStatus ||
+                    togglingSubStepId !== null ||
+                    removingSubStepId !== null
+                  }
                 />
               </div>
             </div>
             <div className="row" style={{ marginTop: "0.75rem" }}>
               <button
-                disabled={isDsaLocked || addingSubStep || !subStepTitle.trim() || hasInvalidSubStepWeight}
+                disabled={
+                  isDsaLocked ||
+                  addingSubStep ||
+                  savingStatus ||
+                  togglingSubStepId !== null ||
+                  removingSubStepId !== null ||
+                  !subStepTitle.trim() ||
+                  hasInvalidSubStepWeight
+                }
                 onClick={createSubStep}
               >
                 {addingSubStep ? "Creating…" : "Create Sub-step"}
@@ -864,6 +949,12 @@ export default function TaskDetailPage({ params }: Props) {
                     <input
                       type="checkbox"
                       checked={s.isDone}
+                      disabled={
+                        savingStatus ||
+                        togglingSubStepId !== null ||
+                        addingSubStep ||
+                        removingSubStepId !== null
+                      }
                       onChange={() => toggleSubStep(s)}
                     />
                     <span className={s.isDone ? "substep-done" : ""}>{s.title}</span>
@@ -874,7 +965,12 @@ export default function TaskDetailPage({ params }: Props) {
                       <button
                         type="button"
                         className="secondary"
-                        disabled={removingSubStepId === s.id}
+                        disabled={
+                          savingStatus ||
+                          togglingSubStepId !== null ||
+                          addingSubStep ||
+                          removingSubStepId !== null
+                        }
                         onClick={() => void removeSubStep(s.id)}
                       >
                         {removingSubStepId === s.id ? "Removing…" : "Remove"}
