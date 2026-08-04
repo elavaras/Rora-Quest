@@ -603,11 +603,13 @@ button.secondary {
   flex: none;
   padding: 0.45rem 0.8rem;
 }
-.detail-expand-modal {
-  width: min(960px, 92vw);
-  max-width: 92vw;
+.detail-takeover-card {
+  min-height: calc(100vh - 18rem);
+  display: grid;
+  gap: 1rem;
+  align-content: start;
 }
-.detail-expand-modal-header {
+.detail-takeover-header {
   margin-bottom: 0;
 }
 .detail-expand-modal-note {
@@ -616,6 +618,25 @@ button.secondary {
 .detail-expand-textarea {
   min-height: min(60vh, 32rem);
   resize: vertical;
+}
+.detail-takeover-textarea {
+  min-height: calc(100vh - 24rem);
+}
+.detail-image-preview {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+.detail-image-preview-img {
+  width: 100%;
+  max-height: calc(100vh - 24rem);
+  object-fit: contain;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-task-card);
+}
+.detail-image-preview-meta {
+  margin: 0;
 }
 .substep-list { list-style: none; margin: 0; padding: 0; }
 .substep-row {
@@ -808,6 +829,15 @@ input.select-box {
   background: var(--bg-surface);
 }
 
+.diagram-preview-trigger {
+  display: block;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
+}
+
 .diagram-figure img {
   display: block;
   width: 100%;
@@ -826,8 +856,20 @@ input.select-box {
   gap: 0.5rem;
 }
 
-.diagram-figure figcaption > span {
+.diagram-caption-btn {
+  display: block;
+  flex: 1;
   min-width: 0;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+}
+
+.diagram-caption-btn > span {
+  min-width: 0;
+  display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
