@@ -38,7 +38,7 @@ public sealed class AzureBlobStorageService : IBlobStorageService
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
             throw new InvalidOperationException("AzureBlobStorage:ConnectionString is not configured.");
 
-        var containerName = string.IsNullOrWhiteSpace(options.ContainerName) ? "rora-quest-assets" : options.ContainerName;
+        var containerName = string.IsNullOrWhiteSpace(options.ContainerName) ? "task-assets" : options.ContainerName;
         var serviceClient = new BlobServiceClient(options.ConnectionString);
         _container = serviceClient.GetBlobContainerClient(containerName);
         _container.CreateIfNotExists(PublicAccessType.Blob);
@@ -103,7 +103,7 @@ public sealed class BlobStorageOptions
     public string? ConnectionString { get; set; }
 
     /// <summary>
-    /// Name of the blob container. Defaults to "rora-quest-assets" when not set.
+    /// Name of the blob container. Defaults to "task-assets" when not set.
     /// </summary>
     public string? ContainerName { get; set; }
 }
