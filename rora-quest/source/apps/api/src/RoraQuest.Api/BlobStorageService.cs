@@ -3,9 +3,9 @@ using Azure.Storage.Blobs.Models;
 
 /// <summary>
 /// Abstracts file upload to a remote blob store.
-/// The in-process default (<see cref="NoOpBlobStorageService"/>) is used when no Azure Blob
-/// Storage connection string is configured; it simply returns a placeholder path so the app
-/// remains functional in local development without any cloud dependency.
+/// The in-process default (<see cref="NoOpBlobStorageService"/>) is only used in Development
+/// when no Azure Blob Storage connection string is configured; it returns a placeholder path so
+/// the app remains functional locally without any cloud dependency.
 /// </summary>
 public interface IBlobStorageService
 {
@@ -106,4 +106,26 @@ public sealed class BlobStorageOptions
     /// Name of the blob container. Defaults to "task-assets" when not set.
     /// </summary>
     public string? ContainerName { get; set; }
+}
+
+/// <summary>
+/// Chooses the blob storage implementation based on configuration and environment.
+/// </summary>
+public static class BlobStorageServiceFactory
+{
+    public static IBlobStorageService Create(BlobStorageOptions options, bool allowNoOpFallback)
+    {
+        if (!string.IsNullOrWhiteSpace(options.ConnectionString))
+        {
+            return new AzureBlobStorageService(options);
+        }
+
+        if (allowNoOpFallback)
+        {
+            return new NoOpBlobStorageService();
+        }
+
+        throw new InvalidOperationException(
+            "AzureBlobStorage:ConnectionString is not configured. Set AzureBlobStorage__ConnectionString for non-development environments.");
+    }
 }
