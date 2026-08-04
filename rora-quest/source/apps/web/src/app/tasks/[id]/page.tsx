@@ -85,6 +85,25 @@ function weightedProgress(subSteps: SubStep[], status: string): number {
 }
 
 type Props = { params: { id: string } };
+type ExpandableDetailField = "questionAndReasoning" | "logicNotes" | "algorithmNotes";
+
+const EXPANDABLE_DETAIL_FIELDS: Record<
+  ExpandableDetailField,
+  { label: string; placeholder: string }
+> = {
+  questionAndReasoning: {
+    label: "Question & Reasoning",
+    placeholder: "Capture the question intent, edge cases, and your reasoning."
+  },
+  logicNotes: {
+    label: "Logic",
+    placeholder: "High-level logic and thought process."
+  },
+  algorithmNotes: {
+    label: "Algorithm",
+    placeholder: "Step-by-step algorithm or pseudocode."
+  }
+};
 
 function isDsaCategoryId(categoryId: string | null, categoryById: Map<string, Category>): boolean {
   if (!categoryId) {
@@ -137,6 +156,7 @@ export default function TaskDetailPage({ params }: Props) {
   const [subStepWeight, setSubStepWeight] = useState("1");
   const [addingSubStep, setAddingSubStep] = useState(false);
   const [removingSubStepId, setRemovingSubStepId] = useState<string | null>(null);
+  const [expandedField, setExpandedField] = useState<ExpandableDetailField | null>(null);
   const [opStatus, setOpStatus] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(
     null
   );
@@ -222,6 +242,21 @@ export default function TaskDetailPage({ params }: Props) {
       .then(setCategories)
       .catch(() => setCategories([]));
   }, []);
+
+  useEffect(() => {
+    if (!expandedField) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setExpandedField(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [expandedField]);
 
   const toggleSubStep = async (sub: SubStep) => {
     if (!task) return;
@@ -473,6 +508,55 @@ export default function TaskDetailPage({ params }: Props) {
       (a.contentType?.startsWith("image/") ?? false) ||
       a.assetType.toLowerCase().includes("diagram")
   );
+  const expandedFieldConfig = expandedField ? EXPANDABLE_DETAIL_FIELDS[expandedField] : null;
+  const expandedFieldValue =
+    expandedField === "questionAndReasoning"
+      ? questionAndReasoning
+      : expandedField === "logicNotes"
+        ? logicNotes
+        : expandedField === "algorithmNotes"
+          ? algorithmNotes
+          : "";
+
+  const setExpandedFieldValue = (value: string) => {
+    if (expandedField === "questionAndReasoning") {
+      setQuestionAndReasoning(value);
+      return;
+    }
+
+    if (expandedField === "logicNotes") {
+      setLogicNotes(value);
+      return;
+    }
+
+    if (expandedField === "algorithmNotes") {
+      setAlgorithmNotes(value);
+    }
+  };
+
+  const renderExpandableTextarea = (
+    field: ExpandableDetailField,
+    value: string,
+    setValue: (nextValue: string) => void
+  ) => {
+    const config = EXPANDABLE_DETAIL_FIELDS[field];
+    return (
+      <div className="detail-field-block">
+        <div className="detail-field-header">
+          <h3>{config.label}</h3>
+          <button
+            type="button"
+            className="secondary detail-expand-btn"
+            onClick={() => setExpandedField(field)}
+            aria-label={`Maximize ${config.label}`}
+          >
+            Maximize
+          </button>
+        </div>
+        <textarea value={value} onChange={(e) => setValue(e.target.value)} rows={4} placeholder={config.placeholder} />
+      </div>
+    );
+  };
 
   return (
     <section className="page">
@@ -570,27 +654,9 @@ export default function TaskDetailPage({ params }: Props) {
                   </option>
                 ))}
               </select>
-              <h3 style={{ marginTop: "1rem" }}>Question &amp; Reasoning</h3>
-              <textarea
-                value={questionAndReasoning}
-                onChange={(e) => setQuestionAndReasoning(e.target.value)}
-                rows={4}
-                placeholder="Capture the question intent, edge cases, and your reasoning."
-              />
-              <h3 style={{ marginTop: "1rem" }}>Logic</h3>
-              <textarea
-                value={logicNotes}
-                onChange={(e) => setLogicNotes(e.target.value)}
-                rows={4}
-                placeholder="High-level logic and thought process."
-              />
-              <h3 style={{ marginTop: "1rem" }}>Algorithm</h3>
-              <textarea
-                value={algorithmNotes}
-                onChange={(e) => setAlgorithmNotes(e.target.value)}
-                rows={4}
-                placeholder="Step-by-step algorithm or pseudocode."
-              />
+              {renderExpandableTextarea("questionAndReasoning", questionAndReasoning, setQuestionAndReasoning)}
+              {renderExpandableTextarea("logicNotes", logicNotes, setLogicNotes)}
+              {renderExpandableTextarea("algorithmNotes", algorithmNotes, setAlgorithmNotes)}
               <h3 style={{ marginTop: "1rem" }}>Diagrams</h3>
               <textarea
                 value={diagramContent}
@@ -821,6 +887,36 @@ export default function TaskDetailPage({ params }: Props) {
             {task.subSteps.length === 0 && <p className="muted">No sub-steps.</p>}
           </div>
         </>
+      )}
+
+      {expandedFieldConfig && (
+        <div className="modal-overlay" onClick={() => setExpandedField(null)}>
+          <div
+            className="modal detail-expand-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="expanded-detail-field-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="detail-field-header detail-expand-modal-header">
+              <div>
+                <h3 id="expanded-detail-field-title">{expandedFieldConfig.label}</h3>
+                <p className="muted detail-expand-modal-note">Expanded editor · press Esc to close</p>
+              </div>
+              <button type="button" className="secondary detail-expand-btn" onClick={() => setExpandedField(null)}>
+                Done
+              </button>
+            </div>
+            <textarea
+              className="detail-expand-textarea"
+              value={expandedFieldValue}
+              onChange={(event) => setExpandedFieldValue(event.target.value)}
+              rows={18}
+              placeholder={expandedFieldConfig.placeholder}
+              autoFocus
+            />
+          </div>
+        </div>
       )}
     </section>
   );
