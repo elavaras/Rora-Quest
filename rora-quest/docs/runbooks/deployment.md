@@ -70,6 +70,12 @@ az keyvault secret set \
   --name "PostgresConnectionString" \
   --value "Host=roraqueststore.postgres.database.azure.com;Port=5432;Database=rora-quest-db;Username=cgbimbu;Password=<YOUR_PG_PASSWORD>;SSL Mode=Require;Trust Server Certificate=false;"
 
+# Azure Blob Storage connection string
+az keyvault secret set \
+  --vault-name $KEY_VAULT_NAME \
+  --name "AzureBlobStorageConnectionString" \
+  --value "DefaultEndpointsProtocol=https;AccountName=<account-name>;AccountKey=<account-key>;EndpointSuffix=core.windows.net"
+
 # Entra client secret (the one you set locally as EntraAuth__ClientSecret)
 az keyvault secret set \
   --vault-name $KEY_VAULT_NAME \
