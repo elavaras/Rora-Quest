@@ -1151,13 +1151,44 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 return ServiceResult<TaskSubStep>.Validation("Manual subtask title updates are disabled for the DSA category.");
             }
 
-            if (req.Title is not null) sub.Title = req.Title.Trim();
-            if (req.IsDone is not null)
+            var title = req.Title?.Trim();
+            var titleChanged = title is not null && title != sub.Title;
+            var completionChanged = req.IsDone is not null && req.IsDone.Value != sub.IsDone;
+            if (!titleChanged && !completionChanged)
             {
-                sub.IsDone = req.IsDone.Value;
-                sub.CompletedAt = req.IsDone.Value ? DateTimeOffset.UtcNow : null;
+                return ServiceResult<TaskSubStep>.Ok(sub);
             }
+
+            var now = DateTimeOffset.UtcNow;
+            if (titleChanged) sub.Title = title!;
+
+            TaskStatus? automaticStatus = null;
+            if (completionChanged)
+            {
+                sub.IsDone = req.IsDone!.Value;
+                sub.CompletedAt = sub.IsDone ? now : null;
+
+                if (sub.IsDone &&
+                    task.SubSteps.All(step => step.IsDone) &&
+                    task.Status is TaskStatus.Todo or TaskStatus.InProgress)
+                {
+                    automaticStatus = TaskStatus.Done;
+                }
+                else if (!sub.IsDone && task.Status == TaskStatus.Done)
+                {
+                    automaticStatus = TaskStatus.InProgress;
+                }
+            }
+
+            if (automaticStatus is not null)
+            {
+                var oldStatus = task.Status;
+                task.Status = automaticStatus.Value;
+                task.StatusEvents.Add(new TaskStatusEvent(Guid.NewGuid(), oldStatus, automaticStatus.Value, now));
+            }
+
             sub.RowVersion++;
+            task.UpdatedAt = now;
             task.RowVersion++;
             store.Save(userId, user);
             return ServiceResult<TaskSubStep>.Ok(sub);
