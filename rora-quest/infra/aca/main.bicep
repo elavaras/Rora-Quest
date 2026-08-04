@@ -145,6 +145,11 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
           keyVaultUrl: '${keyVault.properties.vaultUri}secrets/PostgresConnectionString'
           identity: 'system'
         }
+        {
+          name: 'kv-ref-blob-connstr'
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/AzureBlobStorageConnectionString'
+          identity: 'system'
+        }
       ]
     }
     template: {
@@ -165,6 +170,7 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
             { name: 'EntraAuth__SignedOutCallbackPath', value: '/signout-callback-oidc' }
             { name: 'EntraAuth__ClientSecret', secretRef: 'kv-ref-entra-secret' }
             { name: 'ConnectionStrings__Postgres', secretRef: 'kv-ref-pg-connstr' }
+            { name: 'AzureBlobStorage__ConnectionString', secretRef: 'kv-ref-blob-connstr' }
           ]
           probes: [
             {
