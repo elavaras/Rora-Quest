@@ -86,6 +86,9 @@ function weightedProgress(subSteps: SubStep[], status: string): number {
 
 type Props = { params: { id: string } };
 type ExpandableDetailField = "questionAndReasoning" | "logicNotes" | "algorithmNotes";
+type DetailTakeover =
+  | { type: "field"; field: ExpandableDetailField }
+  | { type: "image"; assetId: string };
 
 const EXPANDABLE_DETAIL_FIELDS: Record<
   ExpandableDetailField,
@@ -156,7 +159,7 @@ export default function TaskDetailPage({ params }: Props) {
   const [subStepWeight, setSubStepWeight] = useState("1");
   const [addingSubStep, setAddingSubStep] = useState(false);
   const [removingSubStepId, setRemovingSubStepId] = useState<string | null>(null);
-  const [expandedField, setExpandedField] = useState<ExpandableDetailField | null>(null);
+  const [takeover, setTakeover] = useState<DetailTakeover | null>(null);
   const [opStatus, setOpStatus] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(
     null
   );
@@ -244,19 +247,19 @@ export default function TaskDetailPage({ params }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!expandedField) {
+    if (!takeover) {
       return;
     }
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setExpandedField(null);
+        setTakeover(null);
       }
     };
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [expandedField]);
+  }, [takeover]);
 
   const toggleSubStep = async (sub: SubStep) => {
     if (!task) return;
@@ -508,6 +511,7 @@ export default function TaskDetailPage({ params }: Props) {
       (a.contentType?.startsWith("image/") ?? false) ||
       a.assetType.toLowerCase().includes("diagram")
   );
+  const expandedField = takeover?.type === "field" ? takeover.field : null;
   const expandedFieldConfig = expandedField ? EXPANDABLE_DETAIL_FIELDS[expandedField] : null;
   const expandedFieldValue =
     expandedField === "questionAndReasoning"
@@ -517,6 +521,15 @@ export default function TaskDetailPage({ params }: Props) {
         : expandedField === "algorithmNotes"
           ? algorithmNotes
           : "";
+  const expandedImage = takeover?.type === "image"
+    ? diagramImages.find((asset) => asset.id === takeover.assetId) ?? null
+    : null;
+
+  useEffect(() => {
+    if (takeover?.type === "image" && !expandedImage) {
+      setTakeover(null);
+    }
+  }, [expandedImage, takeover]);
 
   const setExpandedFieldValue = (value: string) => {
     if (expandedField === "questionAndReasoning") {
@@ -547,7 +560,7 @@ export default function TaskDetailPage({ params }: Props) {
           <button
             type="button"
             className="secondary detail-expand-btn"
-            onClick={() => setExpandedField(field)}
+            onClick={() => setTakeover({ type: "field", field })}
             aria-label={`Maximize ${config.label}`}
           >
             Maximize
@@ -627,296 +640,320 @@ export default function TaskDetailPage({ params }: Props) {
             </div>
           </div>
 
-          <div className="grid-2">
-            <div className="card">
-              <h3>Problem Metadata</h3>
-              <label className="field-label" htmlFor="pattern-input">
-                Pattern
-              </label>
-              <input
-                id="pattern-input"
-                placeholder="e.g., Sliding Window"
-                value={pattern}
-                onChange={(e) => setPattern(e.target.value)}
-              />
-              <label className="field-label" htmlFor="difficulty-select">
-                Difficulty
-              </label>
-              <select
-                id="difficulty-select"
-                value={difficulty}
-                onChange={(e) => setDifficulty(e.target.value)}
-              >
-                <option value="">— none —</option>
-                {DIFFICULTIES.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-              {renderExpandableTextarea("questionAndReasoning", questionAndReasoning, setQuestionAndReasoning)}
-              {renderExpandableTextarea("logicNotes", logicNotes, setLogicNotes)}
-              {renderExpandableTextarea("algorithmNotes", algorithmNotes, setAlgorithmNotes)}
-              <h3 style={{ marginTop: "1rem" }}>Diagrams</h3>
-              <textarea
-                value={diagramContent}
-                onChange={(e) => setDiagramContent(e.target.value)}
-                rows={4}
-                placeholder="ASCII diagrams, flow sketches, or links to diagram references."
-              />
-              <div className="diagram-upload-box">
-                <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                  <label className="field-label" htmlFor="diagram-file-input" style={{ margin: 0 }}>
-                    Upload diagram image
+          {takeover ? (
+            <div className="card detail-takeover-card">
+              <div className="detail-field-header detail-takeover-header">
+                <div>
+                  <h3 id="expanded-detail-field-title">
+                    {expandedFieldConfig?.label ?? expandedImage?.fileName ?? "Preview"}
+                  </h3>
+                  <p className="muted detail-expand-modal-note">
+                    {expandedFieldConfig
+                      ? "Expanded editor · press Esc to minimize"
+                      : "Attached image preview · press Esc to minimize"}
+                  </p>
+                </div>
+                <button type="button" className="secondary detail-expand-btn" onClick={() => setTakeover(null)}>
+                  Minimize
+                </button>
+              </div>
+
+              {expandedFieldConfig ? (
+                <textarea
+                  className="detail-expand-textarea detail-takeover-textarea"
+                  value={expandedFieldValue}
+                  onChange={(event) => setExpandedFieldValue(event.target.value)}
+                  rows={18}
+                  placeholder={expandedFieldConfig.placeholder}
+                  autoFocus
+                />
+              ) : expandedImage ? (
+                <div className="detail-image-preview">
+                  <img src={expandedImage.storagePathOrUrl} alt={expandedImage.fileName} className="detail-image-preview-img" />
+                  <p className="muted detail-image-preview-meta">
+                    {expandedImage.fileName}
+                    {expandedImage.sizeBytes != null ? ` · ${Math.round(expandedImage.sizeBytes / 1024)} KB` : ""}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <div className="grid-2">
+                <div className="card">
+                  <h3>Problem Metadata</h3>
+                  <label className="field-label" htmlFor="pattern-input">
+                    Pattern
                   </label>
                   <input
-                    id="diagram-file-input"
-                    type="file"
-                    accept="image/*"
-                    disabled={uploadingDiagram}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        void uploadDiagramImage(file);
-                      }
-                      e.currentTarget.value = "";
-                    }}
+                    id="pattern-input"
+                    placeholder="e.g., Sliding Window"
+                    value={pattern}
+                    onChange={(e) => setPattern(e.target.value)}
                   />
-                </div>
-                {diagramImages.length > 0 ? (
-                  <div className="diagram-grid">
-                    {diagramImages.map((asset) => (
-                      <figure key={asset.id} className="diagram-figure">
-                        <img src={asset.storagePathOrUrl} alt={asset.fileName} />
-                        <figcaption>
-                          <span>{asset.fileName}</span>
-                          <button
-                            type="button"
-                            className="secondary diagram-remove-btn"
-                            disabled={removingAssetId === asset.id}
-                            onClick={() => void removeDiagramImage(asset.id)}
-                          >
-                            {removingAssetId === asset.id ? "Removing…" : "Remove"}
-                          </button>
-                        </figcaption>
-                      </figure>
+                  <label className="field-label" htmlFor="difficulty-select">
+                    Difficulty
+                  </label>
+                  <select
+                    id="difficulty-select"
+                    value={difficulty}
+                    onChange={(e) => setDifficulty(e.target.value)}
+                  >
+                    <option value="">— none —</option>
+                    {DIFFICULTIES.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
                     ))}
+                  </select>
+                  {renderExpandableTextarea("questionAndReasoning", questionAndReasoning, setQuestionAndReasoning)}
+                  {renderExpandableTextarea("logicNotes", logicNotes, setLogicNotes)}
+                  {renderExpandableTextarea("algorithmNotes", algorithmNotes, setAlgorithmNotes)}
+                  <h3 style={{ marginTop: "1rem" }}>Diagrams</h3>
+                  <textarea
+                    value={diagramContent}
+                    onChange={(e) => setDiagramContent(e.target.value)}
+                    rows={4}
+                    placeholder="ASCII diagrams, flow sketches, or links to diagram references."
+                  />
+                  <div className="diagram-upload-box">
+                    <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                      <label className="field-label" htmlFor="diagram-file-input" style={{ margin: 0 }}>
+                        Upload diagram image
+                      </label>
+                      <input
+                        id="diagram-file-input"
+                        type="file"
+                        accept="image/*"
+                        disabled={uploadingDiagram}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            void uploadDiagramImage(file);
+                          }
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                    </div>
+                    {diagramImages.length > 0 ? (
+                      <div className="diagram-grid">
+                        {diagramImages.map((asset) => (
+                          <figure key={asset.id} className="diagram-figure">
+                            <button
+                              type="button"
+                              className="diagram-preview-trigger"
+                              onClick={() => setTakeover({ type: "image", assetId: asset.id })}
+                              aria-label={`Preview ${asset.fileName}`}
+                            >
+                              <img src={asset.storagePathOrUrl} alt={asset.fileName} />
+                            </button>
+                            <figcaption>
+                              <button
+                                type="button"
+                                className="diagram-caption-btn"
+                                onClick={() => setTakeover({ type: "image", assetId: asset.id })}
+                              >
+                                <span>{asset.fileName}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary diagram-remove-btn"
+                                disabled={removingAssetId === asset.id}
+                                onClick={() => void removeDiagramImage(asset.id)}
+                              >
+                                {removingAssetId === asset.id ? "Removing…" : "Remove"}
+                              </button>
+                            </figcaption>
+                          </figure>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted" style={{ marginTop: "0.5rem" }}>
+                        No diagram images uploaded yet.
+                      </p>
+                    )}
                   </div>
-                ) : (
+                </div>
+
+                <div className="card">
+                  <h3>Task Info</h3>
+                  <p>
+                    <strong>Planned Week:</strong> {task.plannedWeekStart}
+                  </p>
+                  <p>
+                    <strong>Planned Day:</strong> {task.plannedDate ?? "Unscheduled"}
+                  </p>
+                  <p>
+                    <strong>Due:</strong> {task.dueDate ?? "—"}
+                  </p>
+                  <h3 style={{ marginTop: "1rem" }}>Practice Links (LeetCode/HackerRank/etc.)</h3>
+                  {task.links && task.links.length > 0 ? (
+                    <ul>
+                      {task.links.map((l) => (
+                        <li key={l.id}>
+                          <a href={l.url} target="_blank" rel="noreferrer">
+                            {l.label ?? l.url}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">No links yet.</p>
+                  )}
+                  <div className="grid-2" style={{ marginTop: "0.75rem" }}>
+                    <div>
+                      <label className="field-label" htmlFor="practice-link-url">
+                        Link URL
+                      </label>
+                      <input
+                        id="practice-link-url"
+                        placeholder="https://leetcode.com/problems/..."
+                        value={linkUrl}
+                        onChange={(e) => setLinkUrl(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label" htmlFor="practice-link-label">
+                        Label (optional)
+                      </label>
+                      <input
+                        id="practice-link-label"
+                        placeholder="Two Sum"
+                        value={linkLabel}
+                        onChange={(e) => setLinkLabel(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="row" style={{ marginTop: "0.75rem" }}>
+                    <button disabled={addingLink || !linkUrl.trim()} onClick={addPracticeLink}>
+                      {addingLink ? "Adding…" : "Add Practice Link"}
+                    </button>
+                  </div>
+                  <h3 style={{ marginTop: "1rem" }}>Effort Tracking</h3>
+                  <div className="grid-2" style={{ marginTop: "0.5rem" }}>
+                    <div>
+                      <label className="field-label" htmlFor="estimated-hours">
+                        Estimated Hours
+                      </label>
+                      <input
+                        id="estimated-hours"
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder="e.g. 2"
+                        value={estimatedHours}
+                        onChange={(e) => setEstimatedHours(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label" htmlFor="actual-hours">
+                        Actual Hours
+                      </label>
+                      <input
+                        id="actual-hours"
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder="e.g. 1.5"
+                        value={actualHours}
+                        onChange={(e) => setActualHours(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: "0.5rem" }}>
+                    <label className="field-label" htmlFor="story-points">
+                      Story Points
+                    </label>
+                    <input
+                      id="story-points"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="e.g. 3"
+                      value={storyPoints}
+                      onChange={(e) => setStoryPoints(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="card">
+                <h3>
+                  Sub-steps · {task.subSteps.filter((s) => s.isDone).length}/{task.subSteps.length}
+                </h3>
+                <div className="grid-2" style={{ marginTop: "0.75rem" }}>
+                  <div>
+                    <label className="field-label" htmlFor="sub-step-title">
+                      New sub-step title
+                    </label>
+                    <input
+                      id="sub-step-title"
+                      placeholder="e.g., Draft solution approach"
+                      value={subStepTitle}
+                      onChange={(e) => setSubStepTitle(e.target.value)}
+                      disabled={isDsaLocked || addingSubStep}
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label" htmlFor="sub-step-weight">
+                      Weight
+                    </label>
+                    <input
+                      id="sub-step-weight"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={subStepWeight}
+                      onChange={(e) => setSubStepWeight(e.target.value)}
+                      disabled={isDsaLocked || addingSubStep}
+                    />
+                  </div>
+                </div>
+                <div className="row" style={{ marginTop: "0.75rem" }}>
+                  <button
+                    disabled={isDsaLocked || addingSubStep || !subStepTitle.trim() || hasInvalidSubStepWeight}
+                    onClick={createSubStep}
+                  >
+                    {addingSubStep ? "Creating…" : "Create Sub-step"}
+                  </button>
+                </div>
+                {isDsaLocked && (
                   <p className="muted" style={{ marginTop: "0.5rem" }}>
-                    No diagram images uploaded yet.
+                    Manual sub-step creation/removal is disabled for DSA tasks.
                   </p>
                 )}
-              </div>
-            </div>
-
-            <div className="card">
-              <h3>Task Info</h3>
-              <p>
-                <strong>Planned Week:</strong> {task.plannedWeekStart}
-              </p>
-              <p>
-                <strong>Planned Day:</strong> {task.plannedDate ?? "Unscheduled"}
-              </p>
-              <p>
-                <strong>Due:</strong> {task.dueDate ?? "—"}
-              </p>
-              <h3 style={{ marginTop: "1rem" }}>Practice Links (LeetCode/HackerRank/etc.)</h3>
-              {task.links && task.links.length > 0 ? (
-                <ul>
-                  {task.links.map((l) => (
-                    <li key={l.id}>
-                      <a href={l.url} target="_blank" rel="noreferrer">
-                        {l.label ?? l.url}
-                      </a>
+                <ul className="substep-list">
+                  {task.subSteps.map((s) => (
+                    <li key={s.id} className="substep-row">
+                      <label className="substep-check">
+                        <input
+                          type="checkbox"
+                          checked={s.isDone}
+                          onChange={() => toggleSubStep(s)}
+                        />
+                        <span className={s.isDone ? "substep-done" : ""}>{s.title}</span>
+                      </label>
+                      <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+                        <span className="substep-weight">{s.weight} pts</span>
+                        {!isDsaLocked && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={removingSubStepId === s.id}
+                            onClick={() => void removeSubStep(s.id)}
+                          >
+                            {removingSubStepId === s.id ? "Removing…" : "Remove"}
+                          </button>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="muted">No links yet.</p>
-              )}
-              <div className="grid-2" style={{ marginTop: "0.75rem" }}>
-                <div>
-                  <label className="field-label" htmlFor="practice-link-url">
-                    Link URL
-                  </label>
-                  <input
-                    id="practice-link-url"
-                    placeholder="https://leetcode.com/problems/..."
-                    value={linkUrl}
-                    onChange={(e) => setLinkUrl(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="field-label" htmlFor="practice-link-label">
-                    Label (optional)
-                  </label>
-                  <input
-                    id="practice-link-label"
-                    placeholder="Two Sum"
-                    value={linkLabel}
-                    onChange={(e) => setLinkLabel(e.target.value)}
-                  />
-                </div>
+                {task.subSteps.length === 0 && <p className="muted">No sub-steps.</p>}
               </div>
-              <div className="row" style={{ marginTop: "0.75rem" }}>
-                <button disabled={addingLink || !linkUrl.trim()} onClick={addPracticeLink}>
-                  {addingLink ? "Adding…" : "Add Practice Link"}
-                </button>
-              </div>
-              <h3 style={{ marginTop: "1rem" }}>Effort Tracking</h3>
-              <div className="grid-2" style={{ marginTop: "0.5rem" }}>
-                <div>
-                  <label className="field-label" htmlFor="estimated-hours">
-                    Estimated Hours
-                  </label>
-                  <input
-                    id="estimated-hours"
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    placeholder="e.g. 2"
-                    value={estimatedHours}
-                    onChange={(e) => setEstimatedHours(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="field-label" htmlFor="actual-hours">
-                    Actual Hours
-                  </label>
-                  <input
-                    id="actual-hours"
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    placeholder="e.g. 1.5"
-                    value={actualHours}
-                    onChange={(e) => setActualHours(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div style={{ marginTop: "0.5rem" }}>
-                <label className="field-label" htmlFor="story-points">
-                  Story Points
-                </label>
-                <input
-                  id="story-points"
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="e.g. 3"
-                  value={storyPoints}
-                  onChange={(e) => setStoryPoints(e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <h3>
-              Sub-steps · {task.subSteps.filter((s) => s.isDone).length}/{task.subSteps.length}
-            </h3>
-            <div className="grid-2" style={{ marginTop: "0.75rem" }}>
-              <div>
-                <label className="field-label" htmlFor="sub-step-title">
-                  New sub-step title
-                </label>
-                <input
-                  id="sub-step-title"
-                  placeholder="e.g., Draft solution approach"
-                  value={subStepTitle}
-                  onChange={(e) => setSubStepTitle(e.target.value)}
-                  disabled={isDsaLocked || addingSubStep}
-                />
-              </div>
-              <div>
-                <label className="field-label" htmlFor="sub-step-weight">
-                  Weight
-                </label>
-                <input
-                  id="sub-step-weight"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={subStepWeight}
-                  onChange={(e) => setSubStepWeight(e.target.value)}
-                  disabled={isDsaLocked || addingSubStep}
-                />
-              </div>
-            </div>
-            <div className="row" style={{ marginTop: "0.75rem" }}>
-              <button
-                disabled={isDsaLocked || addingSubStep || !subStepTitle.trim() || hasInvalidSubStepWeight}
-                onClick={createSubStep}
-              >
-                {addingSubStep ? "Creating…" : "Create Sub-step"}
-              </button>
-            </div>
-            {isDsaLocked && (
-              <p className="muted" style={{ marginTop: "0.5rem" }}>
-                Manual sub-step creation/removal is disabled for DSA tasks.
-              </p>
-            )}
-            <ul className="substep-list">
-              {task.subSteps.map((s) => (
-                <li key={s.id} className="substep-row">
-                  <label className="substep-check">
-                    <input
-                      type="checkbox"
-                      checked={s.isDone}
-                      onChange={() => toggleSubStep(s)}
-                    />
-                    <span className={s.isDone ? "substep-done" : ""}>{s.title}</span>
-                  </label>
-                  <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
-                    <span className="substep-weight">{s.weight} pts</span>
-                    {!isDsaLocked && (
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={removingSubStepId === s.id}
-                        onClick={() => void removeSubStep(s.id)}
-                      >
-                        {removingSubStepId === s.id ? "Removing…" : "Remove"}
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-            {task.subSteps.length === 0 && <p className="muted">No sub-steps.</p>}
-          </div>
+            </>
+          )}
         </>
-      )}
-
-      {expandedFieldConfig && (
-        <div className="modal-overlay" onClick={() => setExpandedField(null)}>
-          <div
-            className="modal detail-expand-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="expanded-detail-field-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="detail-field-header detail-expand-modal-header">
-              <div>
-                <h3 id="expanded-detail-field-title">{expandedFieldConfig.label}</h3>
-                <p className="muted detail-expand-modal-note">Expanded editor · press Esc to close</p>
-              </div>
-              <button type="button" className="secondary detail-expand-btn" onClick={() => setExpandedField(null)}>
-                Done
-              </button>
-            </div>
-            <textarea
-              className="detail-expand-textarea"
-              value={expandedFieldValue}
-              onChange={(event) => setExpandedFieldValue(event.target.value)}
-              rows={18}
-              placeholder={expandedFieldConfig.placeholder}
-              autoFocus
-            />
-          </div>
-        </div>
       )}
     </section>
   );
