@@ -176,6 +176,20 @@ builder.Services.AddHttpClient<ITeamsDigestSender, TeamsDigestSender>();
 builder.Services.AddSingleton<DailyDigestDispatcher>();
 builder.Services.AddHostedService<DailyDigestScheduler>();
 
+// Azure Blob Storage — used for task asset (image) uploads.
+// Requires "AzureBlobStorage:ConnectionString" in configuration.
+// Falls back to a no-op implementation for local development when not configured.
+var blobOptions = builder.Configuration.GetSection("AzureBlobStorage").Get<BlobStorageOptions>() ?? new BlobStorageOptions();
+if (!string.IsNullOrWhiteSpace(blobOptions.ConnectionString))
+{
+    builder.Services.AddSingleton(blobOptions);
+    builder.Services.AddSingleton<IBlobStorageService, AzureBlobStorageService>();
+}
+else
+{
+    builder.Services.AddSingleton<IBlobStorageService, NoOpBlobStorageService>();
+}
+
 var app = builder.Build();
 
 // Run database migrations on startup when PostgreSQL is configured.
