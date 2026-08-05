@@ -4,7 +4,7 @@ export type AuthMe = {
   email: string | null;
 };
 
-const LOCAL_API_BASE = "http://localhost:5000";
+const LOCAL_API_BASE = "http://localhost:61349";
 
 export function getApiAuthHeaders(): Record<string, string> {
   return {
