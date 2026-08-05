@@ -235,15 +235,42 @@ public static class ApiEndpoints
             return svc.DeleteLink(UserScope.GetUserId(http), taskId, linkId) ? Results.NoContent() : Results.NotFound();
         });
 
-        group.MapPost("/{taskId:guid}/assets", (Guid taskId, CreateAssetRequest req, RoraQuestService svc, HttpContext http) =>
+        group.MapPost("/{taskId:guid}/assets", async (Guid taskId, HttpRequest request, RoraQuestService svc, HttpContext http, CancellationToken cancellationToken) =>
         {
-            var result = svc.CreateAsset(UserScope.GetUserId(http), taskId, req);
-            return result.ToResult();
+            var userId = UserScope.GetUserId(http);
+
+            if (request.HasFormContentType)
+            {
+                var form = await request.ReadFormAsync(cancellationToken);
+                var file = form.Files.GetFile("file") ?? form.Files.FirstOrDefault();
+                if (file is null)
+                {
+                    return Results.BadRequest("A file upload is required.");
+                }
+
+                var assetType = form["assetType"].ToString();
+                var fileName = string.IsNullOrWhiteSpace(form["fileName"].ToString()) ? file.FileName : form["fileName"].ToString();
+                var contentType = string.IsNullOrWhiteSpace(form["contentType"].ToString()) ? file.ContentType : form["contentType"].ToString();
+                var sizeBytes = long.TryParse(form["sizeBytes"], out var parsedSize) ? parsedSize : file.Length;
+
+                await using var stream = file.OpenReadStream();
+                var result = await svc.CreateAssetAsync(userId, taskId, assetType, fileName, contentType, sizeBytes, stream, cancellationToken);
+                return result.ToResult();
+            }
+
+            var req = await request.ReadFromJsonAsync<CreateAssetRequest>(cancellationToken);
+            if (req is null)
+            {
+                return Results.BadRequest("Request body is required.");
+            }
+
+            var jsonResult = await svc.CreateAssetAsync(userId, taskId, req, cancellationToken);
+            return jsonResult.ToResult();
         });
 
-        group.MapDelete("/{taskId:guid}/assets/{assetId:guid}", (Guid taskId, Guid assetId, RoraQuestService svc, HttpContext http) =>
+        group.MapDelete("/{taskId:guid}/assets/{assetId:guid}", async (Guid taskId, Guid assetId, RoraQuestService svc, HttpContext http, CancellationToken cancellationToken) =>
         {
-            return svc.DeleteAsset(UserScope.GetUserId(http), taskId, assetId) ? Results.NoContent() : Results.NotFound();
+            return await svc.DeleteAssetAsync(UserScope.GetUserId(http), taskId, assetId, cancellationToken) ? Results.NoContent() : Results.NotFound();
         });
 
         group.MapPost("/spillover", (SpilloverRequest req, RoraQuestService svc, HttpContext http) =>
@@ -463,8 +490,9 @@ public sealed class UserData
     public NotificationSettings NotificationSettings { get; set; } = new();
 }
 
-public sealed class RoraQuestService(IRoraQuestStore store)
+public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? assetStorage = null)
 {
+    private readonly ITaskAssetStorage _assetStorage = assetStorage ?? new NullTaskAssetStorage();
     private readonly object _gate = new();
     private const string DsaRootCategoryName = "DSA";
 
@@ -1259,25 +1287,116 @@ public sealed class RoraQuestService(IRoraQuestStore store)
     }
 
     public ServiceResult<TaskAsset> CreateAsset(string userId, Guid taskId, CreateAssetRequest req)
+        => CreateAssetAsync(userId, taskId, req).GetAwaiter().GetResult();
+
+    public async Task<ServiceResult<TaskAsset>> CreateAssetAsync(
+        string userId,
+        Guid taskId,
+        CreateAssetRequest req,
+        CancellationToken cancellationToken = default)
     {
-        lock (_gate)
+        if (string.IsNullOrWhiteSpace(req.AssetType))
         {
-            var user = GetUser(userId);
-            if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskAsset>.NotFound();
-            var asset = new TaskAsset(Guid.NewGuid(), req.AssetType, req.StoragePathOrUrl, req.FileName, req.ContentType, req.SizeBytes, DateTimeOffset.UtcNow);
-            task.Assets.Add(asset);
-            task.RowVersion++;
-            store.Save(userId, user);
-            return ServiceResult<TaskAsset>.Ok(asset);
+            return ServiceResult<TaskAsset>.Validation("assetType is required.");
         }
+
+        if (string.IsNullOrWhiteSpace(req.FileName))
+        {
+            return ServiceResult<TaskAsset>.Validation("fileName is required.");
+        }
+
+        if (TryDecodeInlineDataUrl(req.StoragePathOrUrl, out var inlineContentType, out var inlineBytes))
+        {
+            var uploadContentType = string.IsNullOrWhiteSpace(req.ContentType) ? inlineContentType : req.ContentType;
+            var uploadSize = req.SizeBytes ?? inlineBytes.LongLength;
+            await using var content = new MemoryStream(inlineBytes, writable: false);
+            return await CreateAssetAsync(
+                userId,
+                taskId,
+                req.AssetType,
+                req.FileName,
+                uploadContentType,
+                uploadSize,
+                content,
+                cancellationToken);
+        }
+
+        if (!Uri.TryCreate(req.StoragePathOrUrl, UriKind.Absolute, out _))
+        {
+            return ServiceResult<TaskAsset>.Validation("storagePathOrUrl must be a blob URL or data URL.");
+        }
+
+        return CreateStoredAsset(userId, taskId, req.AssetType, req.StoragePathOrUrl, req.FileName, req.ContentType, req.SizeBytes);
+    }
+
+    public async Task<ServiceResult<TaskAsset>> CreateAssetAsync(
+        string userId,
+        Guid taskId,
+        string assetType,
+        string fileName,
+        string? contentType,
+        long? sizeBytes,
+        Stream content,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(assetType))
+        {
+            return ServiceResult<TaskAsset>.Validation("assetType is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return ServiceResult<TaskAsset>.Validation("fileName is required.");
+        }
+
+        var storagePathOrUrl = await _assetStorage.UploadAsync(userId, taskId, fileName, contentType, content, cancellationToken)
+            .ConfigureAwait(false);
+
+        var result = CreateStoredAsset(userId, taskId, assetType, storagePathOrUrl, fileName, contentType, sizeBytes);
+        if (result.StatusCode == StatusCodes.Status404NotFound)
+        {
+            await _assetStorage.DeleteAsync(storagePathOrUrl, cancellationToken).ConfigureAwait(false);
+        }
+
+        return result;
     }
 
     public bool DeleteAsset(string userId, Guid taskId, Guid assetId)
+        => DeleteAssetAsync(userId, taskId, assetId).GetAwaiter().GetResult();
+
+    public async Task<bool> DeleteAssetAsync(string userId, Guid taskId, Guid assetId, CancellationToken cancellationToken = default)
     {
+        string? storagePathOrUrl = null;
         lock (_gate)
         {
             var user = GetUser(userId);
-            if (!user.Tasks.TryGetValue(taskId, out var task)) return false;
+            if (!user.Tasks.TryGetValue(taskId, out var task))
+            {
+                return false;
+            }
+
+            var asset = task.Assets.FirstOrDefault(x => x.Id == assetId);
+            if (asset is null)
+            {
+                return false;
+            }
+
+            storagePathOrUrl = asset.StoragePathOrUrl;
+        }
+
+        if (storagePathOrUrl is not null)
+        {
+            await _assetStorage.DeleteAsync(storagePathOrUrl, cancellationToken).ConfigureAwait(false);
+        }
+
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            if (!user.Tasks.TryGetValue(taskId, out var task))
+            {
+                return true;
+            }
+
             var removed = task.Assets.RemoveAll(x => x.Id == assetId) > 0;
             if (removed)
             {
@@ -1285,7 +1404,72 @@ public sealed class RoraQuestService(IRoraQuestStore store)
                 task.UpdatedAt = DateTimeOffset.UtcNow;
                 store.Save(userId, user);
             }
+
             return removed;
+        }
+    }
+
+    private ServiceResult<TaskAsset> CreateStoredAsset(
+        string userId,
+        Guid taskId,
+        string assetType,
+        string storagePathOrUrl,
+        string fileName,
+        string? contentType,
+        long? sizeBytes)
+    {
+        lock (_gate)
+        {
+            var user = GetUser(userId);
+            if (!user.Tasks.TryGetValue(taskId, out var task))
+            {
+                return ServiceResult<TaskAsset>.NotFound();
+            }
+
+            var asset = new TaskAsset(Guid.NewGuid(), assetType, storagePathOrUrl, fileName, contentType, sizeBytes, DateTimeOffset.UtcNow);
+            task.Assets.Add(asset);
+            task.RowVersion++;
+            store.Save(userId, user);
+            return ServiceResult<TaskAsset>.Ok(asset);
+        }
+    }
+
+    private static bool TryDecodeInlineDataUrl(string value, out string contentType, out byte[] bytes)
+    {
+        contentType = "application/octet-stream";
+        bytes = [];
+
+        if (string.IsNullOrWhiteSpace(value) || !value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var comma = value.IndexOf(',');
+        if (comma <= 5)
+        {
+            return false;
+        }
+
+        var metadata = value[5..comma];
+        if (!metadata.EndsWith(";base64", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var inlineContentType = metadata[..^7];
+        if (!string.IsNullOrWhiteSpace(inlineContentType))
+        {
+            contentType = inlineContentType;
+        }
+
+        try
+        {
+            bytes = Convert.FromBase64String(value[(comma + 1)..]);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
         }
     }
 

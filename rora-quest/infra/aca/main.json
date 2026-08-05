@@ -115,6 +115,33 @@
       }
     },
     {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "[format('roraquest{0}assets', toLower(parameters('environment')))]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "allowBlobPublicAccess": true,
+        "minimumTlsVersion": "TLS1_2",
+        "supportsHttpsTrafficOnly": true
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}/StorageConnectionString', format('rora-kv-{0}', parameters('environment')))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', format('roraquest{0}assets', toLower(parameters('environment'))))]",
+        "[resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment')))]"
+      ],
+      "properties": {
+        "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', format('roraquest{0}assets', toLower(parameters('environment'))), listKeys(resourceId('Microsoft.Storage/storageAccounts', format('roraquest{0}assets', toLower(parameters('environment')))), '2023-01-01').keys[0].value, environment().suffixes.storage)]"
+      }
+    },
+    {
       "type": "Microsoft.App/managedEnvironments",
       "apiVersion": "2023-05-01",
       "name": "[format('rora-quest-env-{0}', parameters('environment'))]",
@@ -169,6 +196,11 @@
               "name": "kv-ref-pg-connstr",
               "keyVaultUrl": "[format('{0}secrets/PostgresConnectionString', reference(resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment'))), '2023-07-01').vaultUri)]",
               "identity": "system"
+            },
+            {
+              "name": "kv-ref-storage-connstr",
+              "keyVaultUrl": "[format('{0}secrets/StorageConnectionString', reference(resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment'))), '2023-07-01').vaultUri)]",
+              "identity": "system"
             }
           ]
         },
@@ -207,12 +239,20 @@
                   "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'rora-quest-web'), '2023-05-01').configuration.ingress.fqdn)]"
                 },
                 {
+                  "name": "Storage__ContainerName",
+                  "value": "task-assets"
+                },
+                {
                   "name": "EntraAuth__ClientSecret",
                   "secretRef": "kv-ref-entra-secret"
                 },
                 {
                   "name": "ConnectionStrings__Postgres",
                   "secretRef": "kv-ref-pg-connstr"
+                },
+                {
+                  "name": "Storage__ConnectionString",
+                  "secretRef": "kv-ref-storage-connstr"
                 }
               ],
               "probes": [
@@ -257,7 +297,8 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.App/managedEnvironments', format('rora-quest-env-{0}', parameters('environment')))]",
-        "[resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment')))]"
+        "[resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment')))]",
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', format('{0}/StorageConnectionString', format('rora-kv-{0}', parameters('environment'))))]"
       ]
     },
     {
