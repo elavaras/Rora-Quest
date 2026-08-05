@@ -54,12 +54,18 @@ type TaskItem = {
 type Category = { id: string; name: string; parentCategoryId: string | null };
 
 async function apiCall<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = {
+    ...getApiAuthHeaders(),
+    ...(init?.headers ?? {})
+  } as Record<string, string>;
+
+  if (init?.body instanceof FormData) {
+    delete headers["Content-Type"];
+  }
+
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
-    headers: {
-      ...getApiAuthHeaders(),
-      ...(init?.headers ?? {})
-    },
+    headers,
     credentials: "include",
     cache: "no-store"
   });
@@ -439,21 +445,16 @@ export default function TaskDetailPage({ params }: Props) {
     setError(null);
     setStatus("info", "Uploading diagram image...");
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result ?? ""));
-        reader.onerror = () => reject(new Error("Unable to read file."));
-        reader.readAsDataURL(file);
-      });
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("assetType", "DiagramImage");
+      formData.append("fileName", file.name);
+      formData.append("contentType", file.type || "image/*");
+      formData.append("sizeBytes", String(file.size));
+
       const created = await apiCall<TaskAsset>(`/api/tasks/${id}/assets`, {
         method: "POST",
-        body: JSON.stringify({
-          assetType: "DiagramImage",
-          storagePathOrUrl: dataUrl,
-          fileName: file.name,
-          contentType: file.type || "image/*",
-          sizeBytes: file.size
-        })
+        body: formData
       });
       setTask((current) =>
         current

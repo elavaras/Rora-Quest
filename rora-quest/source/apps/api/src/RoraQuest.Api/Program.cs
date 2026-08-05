@@ -171,6 +171,18 @@ else
     builder.Services.AddSingleton<IRoraQuestStore, InMemoryRoraQuestStore>();
 }
 
+var blobConnectionString = builder.Configuration["Storage:ConnectionString"]
+    ?? builder.Configuration.GetConnectionString("BlobStorage");
+var blobContainerName = builder.Configuration["Storage:ContainerName"] ?? "task-assets";
+if (!string.IsNullOrWhiteSpace(blobConnectionString))
+{
+    builder.Services.AddSingleton<ITaskAssetStorage>(_ => new BlobTaskAssetStorage(blobConnectionString, blobContainerName));
+}
+else
+{
+    builder.Services.AddSingleton<ITaskAssetStorage, NullTaskAssetStorage>();
+}
+
 builder.Services.AddSingleton<RoraQuestService>();
 builder.Services.AddHttpClient<ITeamsDigestSender, TeamsDigestSender>();
 builder.Services.AddSingleton<DailyDigestDispatcher>();

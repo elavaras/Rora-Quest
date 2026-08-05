@@ -32,6 +32,11 @@ param pgDatabase string = 'rora-quest-db'
 @description('PostgreSQL username')
 param pgUsername string
 
+var storageAccountName = 'roraquest${toLower(environment)}assets'
+var storageContainerName = 'task-assets'
+var storageKeys = listKeys(storage.id, '2023-01-01')
+var storageAccountConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccountName};AccountKey=${storageKeys.keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+
 // ─────────────────────────────────────────────
 // User-Assigned Managed Identity — ACR pull
 // ─────────────────────────────────────────────
@@ -56,6 +61,9 @@ resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-
     principalId: pullIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
+  dependsOn: [
+    storageConnStringSecret
+  ]
 }
 
 // ─────────────────────────────────────────────
@@ -83,6 +91,34 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
     sku: { name: 'PerGB2018' }
     retentionInDays: 30
   }
+}
+
+// ─────────────────────────────────────────────
+// Blob storage for task assets
+// ─────────────────────────────────────────────
+resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageAccountName
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  properties: {
+    allowBlobPublicAccess: true
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+  }
+}
+
+resource storageConnStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'StorageConnectionString'
+  properties: {
+    value: storageAccountConnectionString
+  }
+  dependsOn: [
+    storage
+  ]
 }
 
 // ─────────────────────────────────────────────
@@ -139,6 +175,11 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
           keyVaultUrl: '${keyVault.properties.vaultUri}secrets/PostgresConnectionString'
           identity: 'system'
         }
+        {
+          name: 'kv-ref-storage-connstr'
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/StorageConnectionString'
+          identity: 'system'
+        }
       ]
     }
     template: {
@@ -158,6 +199,8 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
             { name: 'EntraAuth__CallbackPath', value: '/signin-oidc' }
             { name: 'EntraAuth__SignedOutCallbackPath', value: '/signout-callback-oidc' }
             { name: 'Cors__AllowedOrigins', value: 'https://${webApp.properties.configuration.ingress.fqdn}' }
+            { name: 'Storage__ContainerName', value: storageContainerName }
+            { name: 'Storage__ConnectionString', secretRef: 'kv-ref-storage-connstr' }
             { name: 'EntraAuth__ClientSecret', secretRef: 'kv-ref-entra-secret' }
             { name: 'ConnectionStrings__Postgres', secretRef: 'kv-ref-pg-connstr' }
           ]
@@ -189,6 +232,9 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
       }
     }
   }
+  dependsOn: [
+    storageConnStringSecret
+  ]
 }
 
 // ─────────────────────────────────────────────
