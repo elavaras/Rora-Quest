@@ -96,7 +96,7 @@ type Props = { params: { id: string } };
 type ExpandableDetailField = "questionAndReasoning" | "logicNotes" | "algorithmNotes";
 type DetailTakeover =
   | { type: "field"; field: ExpandableDetailField }
-  | { type: "image"; assetId: string };
+  | { type: "image"; assetId: string; currentImageIndex?: number };
 
 const EXPANDABLE_DETAIL_FIELDS: Record<
   ExpandableDetailField,
@@ -270,15 +270,52 @@ export default function TaskDetailPage({ params }: Props) {
       return;
     }
 
-    const handleEscape = (event: KeyboardEvent) => {
+    const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setTakeover(null);
+      } else if (takeover.type === "image") {
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          handleNextImage();
+        } else if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          handlePreviousImage();
+        }
       }
     };
 
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [takeover]);
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, [takeover, diagramImages]);
+
+  // Navigation handlers for image carousel
+  const handleNextImage = () => {
+    if (takeover?.type !== "image") return;
+    
+    const currentIndex = takeover.currentImageIndex ?? 0;
+    if (currentIndex < diagramImages.length - 1) {
+      const nextAsset = diagramImages[currentIndex + 1];
+      setTakeover({
+        type: "image",
+        assetId: nextAsset.id,
+        currentImageIndex: currentIndex + 1,
+      });
+    }
+  };
+
+  const handlePreviousImage = () => {
+    if (takeover?.type !== "image") return;
+    
+    const currentIndex = takeover.currentImageIndex ?? 0;
+    if (currentIndex > 0) {
+      const prevAsset = diagramImages[currentIndex - 1];
+      setTakeover({
+        type: "image",
+        assetId: prevAsset.id,
+        currentImageIndex: currentIndex - 1,
+      });
+    }
+  };
 
   const toggleSubStep = async (sub: SubStep) => {
     if (!task || workflowMutationRef.current) return;
@@ -585,6 +622,12 @@ export default function TaskDetailPage({ params }: Props) {
   const expandedImage = takeover?.type === "image"
     ? diagramImages.find((asset) => asset.id === takeover.assetId) ?? null
     : null;
+  
+  // Computed values for image navigation
+  const currentImageIndex = takeover?.type === "image" ? (takeover.currentImageIndex ?? 0) : 0;
+  const totalImages = diagramImages.length;
+  const canNavigatePrevious = takeover?.type === "image" && currentImageIndex > 0;
+  const canNavigateNext = takeover?.type === "image" && currentImageIndex < totalImages - 1;
 
   useEffect(() => {
     if (takeover?.type === "image" && !expandedImage) {
@@ -735,7 +778,48 @@ export default function TaskDetailPage({ params }: Props) {
                 />
               ) : expandedImage ? (
                 <div className="detail-image-preview">
+                  {/* Previous button */}
+                  {totalImages > 1 && (
+                    <button
+                      type="button"
+                      className="image-nav-btn image-nav-prev"
+                      disabled={!canNavigatePrevious}
+                      onClick={handlePreviousImage}
+                      aria-label={`Previous image (keyboard: Left arrow) - ${currentImageIndex + 1} of ${totalImages}`}
+                      title="Previous image (Left arrow)"
+                    >
+                      ←
+                    </button>
+                  )}
+                  
+                  {/* Image */}
                   <img src={expandedImage.storagePathOrUrl} alt={expandedImage.fileName} className="detail-image-preview-img" />
+                  
+                  {/* Next button */}
+                  {totalImages > 1 && (
+                    <button
+                      type="button"
+                      className="image-nav-btn image-nav-next"
+                      disabled={!canNavigateNext}
+                      onClick={handleNextImage}
+                      aria-label={`Next image (keyboard: Right arrow) - ${currentImageIndex + 1} of ${totalImages}`}
+                      title="Next image (Right arrow)"
+                    >
+                      →
+                    </button>
+                  )}
+                  
+                  {/* Image counter */}
+                  {totalImages > 1 && (
+                    <div
+                      className="image-counter"
+                      aria-live="polite"
+                      aria-atomic="true"
+                    >
+                      {currentImageIndex + 1} of {totalImages}
+                    </div>
+                  )}
+                  
                   <p className="muted detail-image-preview-meta">
                     {expandedImage.fileName}
                     {expandedImage.sizeBytes != null ? ` · ${Math.round(expandedImage.sizeBytes / 1024)} KB` : ""}
@@ -808,7 +892,10 @@ export default function TaskDetailPage({ params }: Props) {
                             <button
                               type="button"
                               className="diagram-preview-trigger"
-                              onClick={() => setTakeover({ type: "image", assetId: asset.id })}
+                              onClick={() => {
+                                const index = diagramImages.findIndex((img) => img.id === asset.id);
+                                setTakeover({ type: "image", assetId: asset.id, currentImageIndex: index >= 0 ? index : 0 });
+                              }}
                               aria-label={`Preview ${asset.fileName}`}
                             >
                               <img src={asset.storagePathOrUrl} alt={asset.fileName} />
@@ -817,7 +904,10 @@ export default function TaskDetailPage({ params }: Props) {
                               <button
                                 type="button"
                                 className="diagram-caption-btn"
-                                onClick={() => setTakeover({ type: "image", assetId: asset.id })}
+                                onClick={() => {
+                                  const index = diagramImages.findIndex((img) => img.id === asset.id);
+                                  setTakeover({ type: "image", assetId: asset.id, currentImageIndex: index >= 0 ? index : 0 });
+                                }}
                               >
                                 <span>{asset.fileName}</span>
                               </button>
