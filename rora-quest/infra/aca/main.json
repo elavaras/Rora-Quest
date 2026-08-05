@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.45.15.27210",
-      "templateHash": "16196388274955852687"
+      "templateHash": "15618962896981674232"
     }
   },
   "parameters": {
@@ -46,46 +46,37 @@
     "acrName": {
       "type": "string",
       "metadata": {
-        "description": "Name of the Azure Container Registry"
-      }
-    },
-    "acrUsername": {
-      "type": "string",
-      "metadata": {
-        "description": "ACR admin username used by Container Apps to pull images"
-      }
-    },
-    "acrPassword": {
-      "type": "securestring",
-      "metadata": {
-        "description": "ACR admin password used by Container Apps to pull images"
-      }
-    },
-    "pgHost": {
-      "type": "string",
-      "defaultValue": "roraqueststore.postgres.database.azure.com",
-      "metadata": {
-        "description": "Existing Azure PostgreSQL server FQDN (e.g. roraqueststore.postgres.database.azure.com)"
-      }
-    },
-    "pgDatabase": {
-      "type": "string",
-      "defaultValue": "rora-quest-db",
-      "metadata": {
-        "description": "PostgreSQL database name"
-      }
-    },
-    "pgUsername": {
-      "type": "string",
-      "metadata": {
-        "description": "PostgreSQL username"
+        "description": "Name of the Azure Container Registry (existing)"
       }
     }
   },
   "variables": {
+    "storageAccountName": "[format('roraquest{0}assets', toLower(parameters('environment')))]",
+    "storageContainerName": "task-assets",
+    "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
     "keyVaultSecretsUserRoleId": "4633458b-17de-408a-b874-0445c86b69e6"
   },
   "resources": [
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[format('rora-quest-pull-id-{0}', parameters('environment'))]",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment'))), variables('acrPullRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleId'))]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment'))), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment')))]"
+      ]
+    },
     {
       "type": "Microsoft.KeyVault/vaults",
       "apiVersion": "2023-07-01",
@@ -117,7 +108,7 @@
     {
       "type": "Microsoft.Storage/storageAccounts",
       "apiVersion": "2023-01-01",
-      "name": "[format('roraquest{0}assets', toLower(parameters('environment')))]",
+      "name": "[variables('storageAccountName')]",
       "location": "[parameters('location')]",
       "sku": {
         "name": "Standard_LRS"
@@ -132,14 +123,14 @@
     {
       "type": "Microsoft.KeyVault/vaults/secrets",
       "apiVersion": "2023-07-01",
-      "name": "[format('{0}/StorageConnectionString', format('rora-kv-{0}', parameters('environment')))]",
-      "dependsOn": [
-        "[resourceId('Microsoft.Storage/storageAccounts', format('roraquest{0}assets', toLower(parameters('environment'))))]",
-        "[resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment')))]"
-      ],
+      "name": "[format('{0}/{1}', format('rora-kv-{0}', parameters('environment')), 'StorageConnectionString')]",
       "properties": {
-        "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', format('roraquest{0}assets', toLower(parameters('environment'))), listKeys(resourceId('Microsoft.Storage/storageAccounts', format('roraquest{0}assets', toLower(parameters('environment')))), '2023-01-01').keys[0].value, environment().suffixes.storage)]"
-      }
+        "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').keys[0].value, environment().suffixes.storage)]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment')))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
     },
     {
       "type": "Microsoft.App/managedEnvironments",
@@ -165,7 +156,10 @@
       "name": "rora-quest-api",
       "location": "[parameters('location')]",
       "identity": {
-        "type": "SystemAssigned"
+        "type": "SystemAssigned, UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment'))))]": {}
+        }
       },
       "properties": {
         "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', format('rora-quest-env-{0}', parameters('environment')))]",
@@ -178,15 +172,10 @@
           "registries": [
             {
               "server": "[format('{0}.azurecr.io', parameters('acrName'))]",
-              "username": "[parameters('acrUsername')]",
-              "passwordSecretRef": "acr-password"
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment')))]"
             }
           ],
           "secrets": [
-            {
-              "name": "acr-password",
-              "value": "[parameters('acrPassword')]"
-            },
             {
               "name": "kv-ref-entra-secret",
               "keyVaultUrl": "[format('{0}secrets/EntraClientSecret', reference(resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment'))), '2023-07-01').vaultUri)]",
@@ -219,6 +208,10 @@
                   "value": "Production"
                 },
                 {
+                  "name": "Postgres__MigrationsPath",
+                  "value": "/app/migrations"
+                },
+                {
                   "name": "EntraAuth__ClientId",
                   "value": "[parameters('entraClientId')]"
                 },
@@ -240,7 +233,11 @@
                 },
                 {
                   "name": "Storage__ContainerName",
-                  "value": "task-assets"
+                  "value": "[variables('storageContainerName')]"
+                },
+                {
+                  "name": "Storage__ConnectionString",
+                  "secretRef": "kv-ref-storage-connstr"
                 },
                 {
                   "name": "EntraAuth__ClientSecret",
@@ -249,10 +246,6 @@
                 {
                   "name": "ConnectionStrings__Postgres",
                   "secretRef": "kv-ref-pg-connstr"
-                },
-                {
-                  "name": "Storage__ConnectionString",
-                  "secretRef": "kv-ref-storage-connstr"
                 }
               ],
               "probes": [
@@ -298,7 +291,9 @@
       "dependsOn": [
         "[resourceId('Microsoft.App/managedEnvironments', format('rora-quest-env-{0}', parameters('environment')))]",
         "[resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment')))]",
-        "[resourceId('Microsoft.KeyVault/vaults/secrets', format('{0}/StorageConnectionString', format('rora-kv-{0}', parameters('environment'))))]"
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment')))]",
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', format('rora-kv-{0}', parameters('environment')), 'StorageConnectionString')]",
+        "[resourceId('Microsoft.App/containerApps', 'rora-quest-web')]"
       ]
     },
     {
@@ -307,7 +302,10 @@
       "name": "rora-quest-web",
       "location": "[parameters('location')]",
       "identity": {
-        "type": "SystemAssigned"
+        "type": "SystemAssigned, UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment'))))]": {}
+        }
       },
       "properties": {
         "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', format('rora-quest-env-{0}', parameters('environment')))]",
@@ -320,16 +318,10 @@
           "registries": [
             {
               "server": "[format('{0}.azurecr.io', parameters('acrName'))]",
-              "username": "[parameters('acrUsername')]",
-              "passwordSecretRef": "acr-password"
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment')))]"
             }
           ],
-          "secrets": [
-            {
-              "name": "acr-password",
-              "value": "[parameters('acrPassword')]"
-            }
-          ]
+          "secrets": []
         },
         "template": {
           "containers": [
@@ -365,8 +357,8 @@
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.App/containerApps', 'rora-quest-api')]",
-        "[resourceId('Microsoft.App/managedEnvironments', format('rora-quest-env-{0}', parameters('environment')))]"
+        "[resourceId('Microsoft.App/managedEnvironments', format('rora-quest-env-{0}', parameters('environment')))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment')))]"
       ]
     },
     {
@@ -401,6 +393,10 @@
     "keyVaultUri": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment'))), '2023-07-01').vaultUri]"
+    },
+    "pullIdentityId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('rora-quest-pull-id-{0}', parameters('environment')))]"
     }
   }
 }

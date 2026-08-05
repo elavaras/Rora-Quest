@@ -23,19 +23,10 @@ param entraTenantId string = 'organizations'
 @description('Name of the Azure Container Registry (existing)')
 param acrName string
 
-@description('Existing Azure PostgreSQL server FQDN (e.g. roraqueststore.postgres.database.azure.com)')
-param pgHost string = 'roraqueststore.postgres.database.azure.com'
-
-@description('PostgreSQL database name')
-param pgDatabase string = 'rora-quest-db'
-
-@description('PostgreSQL username')
-param pgUsername string
-
 var storageAccountName = 'roraquest${toLower(environment)}assets'
 var storageContainerName = 'task-assets'
-var storageKeys = listKeys(storage.id, '2023-01-01')
-var storageAccountConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccountName};AccountKey=${storageKeys.keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+var storageKeys = storage.listKeys()
+var storageAccountConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccountName};AccountKey=${storageKeys.keys[0].value};EndpointSuffix=${az.environment().suffixes.storage}'
 
 // ─────────────────────────────────────────────
 // User-Assigned Managed Identity — ACR pull
@@ -61,9 +52,6 @@ resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-
     principalId: pullIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
-  dependsOn: [
-    storageConnStringSecret
-  ]
 }
 
 // ─────────────────────────────────────────────
@@ -116,9 +104,6 @@ resource storageConnStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' 
   properties: {
     value: storageAccountConnectionString
   }
-  dependsOn: [
-    storage
-  ]
 }
 
 // ─────────────────────────────────────────────
