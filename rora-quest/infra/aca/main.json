@@ -186,11 +186,6 @@
               "name": "kv-ref-pg-connstr",
               "keyVaultUrl": "[format('{0}secrets/PostgresConnectionString', reference(resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment'))), '2023-07-01').vaultUri)]",
               "identity": "system"
-            },
-            {
-              "name": "kv-ref-blob-connstr",
-              "keyVaultUrl": "[format('{0}secrets/AzureBlobStorageConnectionString', reference(resourceId('Microsoft.KeyVault/vaults', format('rora-kv-{0}', parameters('environment'))), '2023-07-01').vaultUri)]",
-              "identity": "system"
             }
           ]
         },
@@ -231,10 +226,6 @@
                 {
                   "name": "ConnectionStrings__Postgres",
                   "secretRef": "kv-ref-pg-connstr"
-                },
-                {
-                  "name": "AzureBlobStorage__ConnectionString",
-                  "secretRef": "kv-ref-blob-connstr"
                 }
               ],
               "probes": [

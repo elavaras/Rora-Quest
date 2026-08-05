@@ -439,26 +439,22 @@ export default function TaskDetailPage({ params }: Props) {
     setError(null);
     setStatus("info", "Uploading diagram image...");
     try {
-      // Send the image as multipart/form-data so the backend can upload it directly to
-      // Azure Blob Storage and store only the resulting URL in PostgreSQL.
-      // Previously the image was read as a base64 data URL on the client and the entire
-      // binary content was stored in the database — this is the corrected flow.
-      const formData = new FormData();
-      formData.append("file", file, file.name);
-
-      const response = await fetch(`${getApiBaseUrl()}/api/tasks/${id}/assets/upload`, {
-        method: "POST",
-        body: formData,
-        // Do NOT set Content-Type: the browser must set it (including the multipart boundary).
-        credentials: "include",
-        cache: "no-store"
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(new Error("Unable to read file."));
+        reader.readAsDataURL(file);
       });
-
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || `Upload failed with status ${response.status}`);
-      }
-      const created = (await response.json()) as TaskAsset;
+      const created = await apiCall<TaskAsset>(`/api/tasks/${id}/assets`, {
+        method: "POST",
+        body: JSON.stringify({
+          assetType: "DiagramImage",
+          storagePathOrUrl: dataUrl,
+          fileName: file.name,
+          contentType: file.type || "image/*",
+          sizeBytes: file.size
+        })
+      });
       setTask((current) =>
         current
           ? {
