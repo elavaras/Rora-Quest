@@ -19,15 +19,6 @@
     },
     "acrName": {
       "value": "roraquestacr"
-    },
-    "pgHost": {
-      "value": "roraqueststore.postgres.database.azure.com"
-    },
-    "pgDatabase": {
-      "value": "rora-quest-db"
-    },
-    "pgUsername": {
-      "value": "cgbimbu"
     }
   }
 }
