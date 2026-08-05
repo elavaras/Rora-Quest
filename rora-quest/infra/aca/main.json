@@ -146,24 +146,7 @@
           "ingress": {
             "external": true,
             "targetPort": 5000,
-            "transport": "http",
-            "corsPolicy": {
-              "allowedOrigins": [
-                "*"
-              ],
-              "allowCredentials": false,
-              "allowedMethods": [
-                "GET",
-                "POST",
-                "PUT",
-                "PATCH",
-                "DELETE",
-                "OPTIONS"
-              ],
-              "allowedHeaders": [
-                "*"
-              ]
-            }
+            "transport": "http"
           },
           "registries": [
             {
@@ -218,6 +201,10 @@
                 {
                   "name": "EntraAuth__SignedOutCallbackPath",
                   "value": "/signout-callback-oidc"
+                },
+                {
+                  "name": "Cors__AllowedOrigins",
+                  "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'rora-quest-web'), '2023-05-01').configuration.ingress.fqdn)]"
                 },
                 {
                   "name": "EntraAuth__ClientSecret",
@@ -316,10 +303,6 @@
                 {
                   "name": "NODE_ENV",
                   "value": "production"
-                },
-                {
-                  "name": "NEXT_PUBLIC_API_BASE_URL",
-                  "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'rora-quest-api'), '2023-05-01').configuration.ingress.fqdn)]"
                 }
               ]
             }
