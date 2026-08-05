@@ -121,12 +121,6 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
         external: true
         targetPort: 5000
         transport: 'http'
-        corsPolicy: {
-          allowedOrigins: ['*']
-          allowCredentials: false
-          allowedMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
-          allowedHeaders: ['*']
-        }
       }
       registries: [
         {
@@ -163,6 +157,7 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
             { name: 'EntraAuth__TenantId', value: entraTenantId }
             { name: 'EntraAuth__CallbackPath', value: '/signin-oidc' }
             { name: 'EntraAuth__SignedOutCallbackPath', value: '/signout-callback-oidc' }
+            { name: 'Cors__AllowedOrigins', value: 'https://${webApp.properties.configuration.ingress.fqdn}' }
             { name: 'EntraAuth__ClientSecret', secretRef: 'kv-ref-entra-secret' }
             { name: 'ConnectionStrings__Postgres', secretRef: 'kv-ref-pg-connstr' }
           ]
@@ -235,7 +230,6 @@ resource webApp 'Microsoft.App/containerApps@2023-05-01' = {
           }
           env: [
             { name: 'NODE_ENV', value: 'production' }
-            { name: 'NEXT_PUBLIC_API_BASE_URL', value: 'https://${apiApp.properties.configuration.ingress.fqdn}' }
           ]
         }
       ]
