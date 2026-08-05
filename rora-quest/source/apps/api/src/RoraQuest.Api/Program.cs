@@ -6,8 +6,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
-using Azure.Storage.Blobs;
-using Microsoft.AspNetCore.DataProtection;
 using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -184,18 +182,6 @@ builder.Services.AddHostedService<DailyDigestScheduler>();
 var blobOptions = builder.Configuration.GetSection("AzureBlobStorage").Get<BlobStorageOptions>() ?? new BlobStorageOptions();
 builder.Services.AddSingleton<IBlobStorageService>(_ =>
     BlobStorageServiceFactory.Create(blobOptions, builder.Environment.IsDevelopment()));
-
-
-// Data Protection — persist keys to Azure Blob Storage so they survive container restarts
-// and are shared across replicas. Falls back to ephemeral (in-memory) keys in Development.
-var dpBuilder = builder.Services.AddDataProtection().SetApplicationName("RoraQuest");
-if (!string.IsNullOrWhiteSpace(blobOptions.ConnectionString))
-{
-    var blobServiceClient = new BlobServiceClient(blobOptions.ConnectionString);
-    var keysContainer = blobServiceClient.GetBlobContainerClient("data-protection-keys");
-    keysContainer.CreateIfNotExists();
-    dpBuilder.PersistKeysToAzureBlobStorage(keysContainer.GetBlobClient("keys.xml"));
-}
 
 var app = builder.Build();
 
