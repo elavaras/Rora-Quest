@@ -241,58 +241,6 @@ public static class ApiEndpoints
             return result.ToResult();
         });
 
-        // File-upload endpoint: accepts multipart/form-data, uploads the file to Azure Blob Storage,
-        // then creates a task asset record whose storagePathOrUrl is the resulting blob URL.
-        // This replaces the previous pattern of base64-encoding the image on the client and passing
-        // it as the storagePathOrUrl JSON field, which caused the binary content to be stored in
-        // PostgreSQL instead of in blob storage.
-        group.MapPost("/{taskId:guid}/assets/upload", async (
-            Guid taskId,
-            IFormFile file,
-            IBlobStorageService blobStorage,
-            RoraQuestService svc,
-            HttpContext http) =>
-        {
-            if (file is null || file.Length == 0)
-            {
-                return Results.BadRequest("No file was provided.");
-            }
-
-            const long maxSizeBytes = 20 * 1024 * 1024; // 20 MB
-            if (file.Length > maxSizeBytes)
-            {
-                return Results.BadRequest($"File exceeds the maximum allowed size of {maxSizeBytes / (1024 * 1024)} MB.");
-            }
-
-            string blobUrl;
-            try
-            {
-                await using var stream = file.OpenReadStream();
-                blobUrl = await blobStorage.UploadAsync(
-                    stream,
-                    file.FileName,
-                    file.ContentType ?? "application/octet-stream",
-                    http.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem(
-                    title: "Blob upload failed.",
-                    detail: ex.Message,
-                    statusCode: StatusCodes.Status502BadGateway);
-            }
-
-            var req = new CreateAssetRequest(
-                AssetType: "DiagramImage",
-                StoragePathOrUrl: blobUrl,
-                FileName: file.FileName,
-                ContentType: file.ContentType,
-                SizeBytes: file.Length);
-
-            var result = svc.CreateAsset(UserScope.GetUserId(http), taskId, req);
-            return result.ToResult();
-        }).DisableAntiforgery();
-
         group.MapDelete("/{taskId:guid}/assets/{assetId:guid}", (Guid taskId, Guid assetId, RoraQuestService svc, HttpContext http) =>
         {
             return svc.DeleteAsset(UserScope.GetUserId(http), taskId, assetId) ? Results.NoContent() : Results.NotFound();
