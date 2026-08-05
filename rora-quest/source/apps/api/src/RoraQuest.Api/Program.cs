@@ -177,11 +177,18 @@ builder.Services.AddSingleton<DailyDigestDispatcher>();
 builder.Services.AddHostedService<DailyDigestScheduler>();
 
 // Azure Blob Storage — used for task asset (image) uploads.
-// Requires "AzureBlobStorage:ConnectionString" in production.
-// Falls back to a no-op implementation only in Development when not configured.
+// Requires "AzureBlobStorage:ConnectionString" in configuration.
+// Falls back to a no-op implementation for local development when not configured.
 var blobOptions = builder.Configuration.GetSection("AzureBlobStorage").Get<BlobStorageOptions>() ?? new BlobStorageOptions();
-builder.Services.AddSingleton<IBlobStorageService>(_ =>
-    BlobStorageServiceFactory.Create(blobOptions, builder.Environment.IsDevelopment()));
+if (!string.IsNullOrWhiteSpace(blobOptions.ConnectionString))
+{
+    builder.Services.AddSingleton(blobOptions);
+    builder.Services.AddSingleton<IBlobStorageService, AzureBlobStorageService>();
+}
+else
+{
+    builder.Services.AddSingleton<IBlobStorageService, NoOpBlobStorageService>();
+}
 
 var app = builder.Build();
 
