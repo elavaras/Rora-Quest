@@ -265,28 +265,12 @@ export default function TaskDetailPage({ params }: Props) {
       .catch(() => setCategories([]));
   }, []);
 
-  useEffect(() => {
-    if (!takeover) {
-      return;
-    }
-
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setTakeover(null);
-      } else if (takeover.type === "image") {
-        if (event.key === "ArrowRight") {
-          event.preventDefault();
-          handleNextImage();
-        } else if (event.key === "ArrowLeft") {
-          event.preventDefault();
-          handlePreviousImage();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeydown);
-    return () => window.removeEventListener("keydown", handleKeydown);
-  }, [takeover, diagramImages]);
+  // Calculate diagram images early so it can be used in effects
+  const diagramImages = (task?.assets ?? []).filter(
+    (a) =>
+      (a.contentType?.startsWith("image/") ?? false) ||
+      a.assetType.toLowerCase().includes("diagram")
+  );
 
   // Navigation handlers for image carousel
   const handleNextImage = () => {
@@ -316,6 +300,29 @@ export default function TaskDetailPage({ params }: Props) {
       });
     }
   };
+
+  useEffect(() => {
+    if (!takeover) {
+      return;
+    }
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setTakeover(null);
+      } else if (takeover.type === "image") {
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          handleNextImage();
+        } else if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          handlePreviousImage();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, [takeover, diagramImages, handleNextImage, handlePreviousImage]);
 
   const toggleSubStep = async (sub: SubStep) => {
     if (!task || workflowMutationRef.current) return;
@@ -604,11 +611,6 @@ export default function TaskDetailPage({ params }: Props) {
   const isDsaLocked = task
     ? isDsaCategoryId(task.categoryId, categoryById) || isDsaCategoryId(task.subCategoryId, categoryById)
     : false;
-  const diagramImages = (task?.assets ?? []).filter(
-    (a) =>
-      (a.contentType?.startsWith("image/") ?? false) ||
-      a.assetType.toLowerCase().includes("diagram")
-  );
   const expandedField = takeover?.type === "field" ? takeover.field : null;
   const expandedFieldConfig = expandedField ? EXPANDABLE_DETAIL_FIELDS[expandedField] : null;
   const expandedFieldValue =
