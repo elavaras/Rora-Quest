@@ -47,12 +47,19 @@ public class TaskWorkflowPolicyTests
     }
 
     [Fact]
-    public void CreateTask_ForDsaCategory_ThrowsInvalidOperation()
+    public void CreateTask_ForDsaCategory_SeedsStandardSubSteps()
     {
         var svc = CreateService();
         var dsa = svc.CreateCategory("user1", new CreateCategoryRequest("DSA", null));
 
-        Assert.Throws<InvalidOperationException>(() => svc.CreateTask("user1", MinimalCreateRequest(categoryId: dsa.Id)));
+        var task = svc.CreateTask("user1", MinimalCreateRequest(categoryId: dsa.Id));
+
+        Assert.Equal(dsa.Id, task.CategoryId);
+        Assert.Equal(RoraQuestService.StandardSubStepTemplate.Length, task.SubSteps.Count);
+        Assert.All(task.SubSteps, step => Assert.False(step.IsDone));
+        Assert.Equal(
+            RoraQuestService.StandardSubStepTemplate.Select(template => template.Title),
+            task.SubSteps.Select(step => step.Title));
     }
 
     [Fact]
@@ -83,14 +90,11 @@ public class TaskWorkflowPolicyTests
     }
 
     [Fact]
-    public void DsaTask_ManualStatusAndSubtaskStructureUpdates_AreBlocked_ButCompletionToggleIsAllowed()
+    public void DsaTask_ManualCreation_StatusAndSubtaskStructureUpdates_AreBlocked_ButCompletionToggleIsAllowed()
     {
         var svc = CreateService();
-        var import = svc.CreateChecklistImport(
-            "user1",
-            new BulkChecklistImportRequest("Week 1: Arrays\nTwo Sum", "DSA", null));
-        _ = svc.CommitChecklistImport("user1", import.Id, null, null);
-        var dsaTask = Assert.Single(svc.GetTasks("user1", new TaskQuery()));
+        var dsa = svc.CreateCategory("user1", new CreateCategoryRequest("DSA", null));
+        var dsaTask = svc.CreateTask("user1", MinimalCreateRequest(categoryId: dsa.Id));
         Assert.NotEmpty(dsaTask.SubSteps);
 
         var statusResult = svc.UpdateTaskStatus(
