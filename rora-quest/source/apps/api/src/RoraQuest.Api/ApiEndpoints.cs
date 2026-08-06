@@ -969,10 +969,6 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
         lock (_gate)
         {
             var user = GetUser(userId);
-            if (IsDsaFlowCategory(user, req.CategoryId, req.SubCategoryId))
-            {
-                throw new InvalidOperationException("Manual task creation is disabled for the DSA category.");
-            }
             var task = new TaskItem
             {
                 Id = Guid.NewGuid(),

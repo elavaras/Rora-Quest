@@ -7,7 +7,6 @@ import { getApiAuthHeaders, getApiBaseUrl } from "../lib/user-session";
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const WORKLOAD_MODES = ["Green", "Yellow", "Red"] as const;
 const DIFFICULTIES = ["Easy", "Medium", "Hard"] as const;
-const DSA_CATEGORY_NAME = "DSA";
 const SPILLOVER_REASONS = [
   "DRI interruption",
   "High Priority Work",
@@ -46,28 +45,6 @@ type WeekConfidenceItem = {
 type ViewMode = "grid" | "list";
 
 type PendingMove = { taskId: string; taskTitle: string; toWeekStart: string; toPlannedDate: string };
-
-function isDsaCategoryId(categoryId: string | null, categoryById: Map<string, Category>): boolean {
-  if (!categoryId) {
-    return false;
-  }
-
-  let currentId: string | null = categoryId;
-  const visited = new Set<string>();
-  while (currentId && !visited.has(currentId)) {
-    visited.add(currentId);
-    const category = categoryById.get(currentId);
-    if (!category) {
-      return false;
-    }
-    if (category.name.trim().toUpperCase() === DSA_CATEGORY_NAME) {
-      return true;
-    }
-    currentId = category.parentCategoryId;
-  }
-
-  return false;
-}
 
 async function apiCall<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
@@ -194,12 +171,10 @@ function TaskCard({
 
 function AddTaskForm({
   categories,
-  isDsaCategoryId,
   onAdd,
   onCancel
 }: {
   categories: Category[];
-  isDsaCategoryId: (categoryId: string | null) => boolean;
   onAdd: (
     title: string,
     categoryId: string | null,
@@ -212,7 +187,6 @@ function AddTaskForm({
   const [categoryId, setCategoryId] = useState("");
   const [pattern, setPattern] = useState("");
   const [difficulty, setDifficulty] = useState("");
-  const selectedCategoryIsDsa = isDsaCategoryId(categoryId || null);
   const submit = () =>
     onAdd(title.trim(), categoryId || null, pattern.trim() || null, difficulty || null);
   return (
@@ -230,10 +204,9 @@ function AddTaskForm({
       <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
         <option value="">No category</option>
         {categories.map((c) => (
-          <option key={c.id} value={c.id} disabled={isDsaCategoryId(c.id)}>
+          <option key={c.id} value={c.id}>
             {c.parentCategoryId ? "— " : ""}
             {c.name}
-            {isDsaCategoryId(c.id) ? " (locked)" : ""}
           </option>
         ))}
       </select>
@@ -255,18 +228,13 @@ function AddTaskForm({
         ))}
       </select>
       <div className="row">
-        <button disabled={!title.trim() || selectedCategoryIsDsa} onClick={submit}>
+        <button disabled={!title.trim()} onClick={submit}>
           Add
         </button>
         <button className="secondary" onClick={onCancel}>
           Cancel
         </button>
       </div>
-      {selectedCategoryIsDsa && (
-        <p className="muted" style={{ margin: "0.5rem 0 0 0" }}>
-          Manual task creation is disabled for DSA categories.
-        </p>
-      )}
     </div>
   );
 }
@@ -298,18 +266,6 @@ export default function TasksPage() {
     for (const c of categories) map.set(c.id, c.name);
     return (id: string | null) => (id ? map.get(id) ?? null : null);
   }, [categories]);
-  const categoryById = useMemo(() => {
-    const map = new Map<string, Category>();
-    for (const category of categories) {
-      map.set(category.id, category);
-    }
-    return map;
-  }, [categories]);
-  const isDsaCategory = useCallback(
-    (categoryId: string | null) => isDsaCategoryId(categoryId, categoryById),
-    [categoryById]
-  );
-
   const loadWeek = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -698,7 +654,6 @@ export default function TasksPage() {
                   {addFor === dateStr && (
                     <AddTaskForm
                       categories={categories}
-                      isDsaCategoryId={isDsaCategory}
                       onAdd={(title, categoryId, pattern, difficulty) =>
                         createTask(title, categoryId, pattern, difficulty, dateStr)
                       }
@@ -756,7 +711,6 @@ export default function TasksPage() {
               <div style={{ maxWidth: 320, marginTop: 8 }}>
                 <AddTaskForm
                   categories={categories}
-                  isDsaCategoryId={isDsaCategory}
                   onAdd={(title, categoryId, pattern, difficulty) =>
                     createTask(title, categoryId, pattern, difficulty, "unscheduled")
                   }
