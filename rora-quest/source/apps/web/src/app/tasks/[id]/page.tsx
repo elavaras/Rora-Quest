@@ -44,6 +44,7 @@ type TaskItem = {
   logicNotes?: string | null;
   algorithmNotes?: string | null;
   diagramContent?: string | null;
+  aiReviewFeedback?: string | null;
   estimatedHours?: number | null;
   actualHours?: number | null;
   storyPoints?: number | null;
@@ -93,7 +94,7 @@ function weightedProgress(subSteps: SubStep[], status: string): number {
 }
 
 type Props = { params: { id: string } };
-type ExpandableDetailField = "questionAndReasoning" | "logicNotes" | "algorithmNotes";
+type ExpandableDetailField = "questionAndReasoning" | "logicNotes" | "algorithmNotes" | "aiReviewFeedback";
 type DetailTakeover =
   | { type: "field"; field: ExpandableDetailField }
   | { type: "image"; assetId: string; currentImageIndex?: number };
@@ -113,6 +114,10 @@ const EXPANDABLE_DETAIL_FIELDS: Record<
   algorithmNotes: {
     label: "Algorithm",
     placeholder: "Step-by-step algorithm or pseudocode."
+  },
+  aiReviewFeedback: {
+    label: "AI Review / Feedback",
+    placeholder: "Capture AI-generated review, critique, or feedback for this problem."
   }
 };
 
@@ -153,6 +158,7 @@ export default function TaskDetailPage({ params }: Props) {
   const [logicNotes, setLogicNotes] = useState("");
   const [algorithmNotes, setAlgorithmNotes] = useState("");
   const [diagramContent, setDiagramContent] = useState("");
+  const [aiReviewFeedback, setAiReviewFeedback] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
   const [addingLink, setAddingLink] = useState(false);
@@ -195,6 +201,7 @@ export default function TaskDetailPage({ params }: Props) {
     setLogicNotes(nextTask.logicNotes ?? "");
     setAlgorithmNotes(nextTask.algorithmNotes ?? "");
     setDiagramContent(nextTask.diagramContent ?? "");
+    setAiReviewFeedback(nextTask.aiReviewFeedback ?? "");
     setEstimatedHours(nextTask.estimatedHours != null ? String(nextTask.estimatedHours) : "");
     setActualHours(nextTask.actualHours != null ? String(nextTask.actualHours) : "");
     setStoryPoints(nextTask.storyPoints != null ? String(nextTask.storyPoints) : "");
@@ -226,6 +233,7 @@ export default function TaskDetailPage({ params }: Props) {
     questionAndReasoning !== (task.questionAndReasoning ?? "") ||
     logicNotes !== (task.logicNotes ?? "") ||
     algorithmNotes !== (task.algorithmNotes ?? "") ||
+    aiReviewFeedback !== (task.aiReviewFeedback ?? "") ||
     diagramContent !== (task.diagramContent ?? "") ||
     normalizeDecimalInput(estimatedHours) !== (task.estimatedHours ?? null) ||
     normalizeDecimalInput(actualHours) !== (task.actualHours ?? null) ||
@@ -388,6 +396,7 @@ export default function TaskDetailPage({ params }: Props) {
           questionAndReasoning,
           logicNotes,
           algorithmNotes,
+          aiReviewFeedback,
           diagramContent,
           estimatedHours: normalizeDecimalInput(estimatedHours),
           actualHours: normalizeDecimalInput(actualHours),
@@ -620,7 +629,9 @@ export default function TaskDetailPage({ params }: Props) {
         ? logicNotes
         : expandedField === "algorithmNotes"
           ? algorithmNotes
-          : "";
+        : expandedField === "aiReviewFeedback"
+          ? aiReviewFeedback
+        : "";
   const expandedImage = takeover?.type === "image"
     ? diagramImages.find((asset) => asset.id === takeover.assetId) ?? null
     : null;
@@ -650,6 +661,11 @@ export default function TaskDetailPage({ params }: Props) {
 
     if (expandedField === "algorithmNotes") {
       setAlgorithmNotes(value);
+      return;
+    }
+
+    if (expandedField === "aiReviewFeedback") {
+      setAiReviewFeedback(value);
     }
   };
 
@@ -861,6 +877,7 @@ export default function TaskDetailPage({ params }: Props) {
                   {renderExpandableTextarea("questionAndReasoning", questionAndReasoning, setQuestionAndReasoning)}
                   {renderExpandableTextarea("logicNotes", logicNotes, setLogicNotes)}
                   {renderExpandableTextarea("algorithmNotes", algorithmNotes, setAlgorithmNotes)}
+                  {renderExpandableTextarea("aiReviewFeedback", aiReviewFeedback, setAiReviewFeedback)}
                   <h3 style={{ marginTop: "1rem" }}>Diagrams</h3>
                   <textarea
                     value={diagramContent}
