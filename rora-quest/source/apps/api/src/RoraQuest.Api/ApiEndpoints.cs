@@ -990,6 +990,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
                 AssignedTo = req.AssignedTo ?? userId,
                 Pattern = req.Pattern,
                 Difficulty = req.Difficulty,
+                AiReviewFeedback = req.AiReviewFeedback,
                 EstimatedHours = req.EstimatedHours,
                 ActualHours = req.ActualHours,
                 StoryPoints = req.StoryPoints,
@@ -1096,6 +1097,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
             if (req.LogicNotes is not null) task.LogicNotes = req.LogicNotes;
             if (req.AlgorithmNotes is not null) task.AlgorithmNotes = req.AlgorithmNotes;
             if (req.DiagramContent is not null) task.DiagramContent = req.DiagramContent;
+            if (req.AiReviewFeedback is not null) task.AiReviewFeedback = req.AiReviewFeedback;
             if (req.EstimatedHours is not null) task.EstimatedHours = req.EstimatedHours;
             if (req.ActualHours is not null) task.ActualHours = req.ActualHours;
             if (req.StoryPoints is not null) task.StoryPoints = req.StoryPoints;
@@ -2167,6 +2169,7 @@ public sealed class TaskItem
     public string? LogicNotes { get; set; }
     public string? AlgorithmNotes { get; set; }
     public string? DiagramContent { get; set; }
+    public string? AiReviewFeedback { get; set; }
     public decimal? EstimatedHours { get; set; }
     public decimal? ActualHours { get; set; }
     public int? StoryPoints { get; set; }
@@ -2424,6 +2427,7 @@ public sealed record CreateTaskRequest(
     string? AssignedTo,
     string? Pattern = null,
     Difficulty? Difficulty = null,
+    string? AiReviewFeedback = null,
     decimal? EstimatedHours = null,
     decimal? ActualHours = null,
     int? StoryPoints = null);
@@ -2446,6 +2450,7 @@ public sealed record UpdateTaskRequest(
     string? LogicNotes = null,
     string? AlgorithmNotes = null,
     string? DiagramContent = null,
+    string? AiReviewFeedback = null,
     decimal? EstimatedHours = null,
     decimal? ActualHours = null,
     int? StoryPoints = null);
