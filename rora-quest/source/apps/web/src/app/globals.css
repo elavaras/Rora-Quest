@@ -322,13 +322,43 @@ button.secondary {
 
 .week-nav {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .week-nav button {
   background: var(--color-medium);
   color: #fff;
+}
+
+.week-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.week-picker label {
+  margin: 0;
+}
+
+.week-picker input {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.week-picker .muted {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+}
+
+.week-nav button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .week-title {
