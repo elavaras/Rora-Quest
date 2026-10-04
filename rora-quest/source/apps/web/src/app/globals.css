@@ -322,13 +322,70 @@ button.secondary {
 
 .week-nav {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .week-nav button {
   background: var(--color-medium);
   color: #fff;
+}
+
+.week-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.week-picker label {
+  margin: 0;
+}
+
+.week-picker input {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.week-picker .muted {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+}
+
+.week-nav button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Keep the week controls reachable without changing other screens' layouts. */
+@media (max-width: 720px) {
+  .app-shell:has(.tasks-page),
+  .app-shell:has(.tasks-page) .main-shell,
+  .tasks-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-shell:has(.tasks-page) .sidebar nav {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .app-shell:has(.tasks-page) .content {
+    min-width: 0;
+    padding: 16px;
+  }
+
+  .app-shell:has(.tasks-page) .top-bar {
+    padding-inline: 16px;
+  }
+
+  .tasks-page .inline-actions {
+    flex-wrap: wrap;
+  }
 }
 
 .week-title {

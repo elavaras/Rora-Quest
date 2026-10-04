@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApiAuthHeaders, getApiBaseUrl } from "../lib/user-session";
+import { addDays, mondayOf, parseYmd, weekFromDateInput, ymd } from "./week-dates";
+import WeekPicker from "./week-picker";
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const WORKLOAD_MODES = ["Green", "Yellow", "Red"] as const;
@@ -66,28 +68,6 @@ async function apiCall<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-// --- date helpers (local, timezone-safe YYYY-MM-DD) ---
-function ymd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-function parseYmd(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-function addDays(d: Date, n: number): Date {
-  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  x.setDate(x.getDate() + n);
-  return x;
-}
-function mondayOf(d: Date): Date {
-  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const dow = (x.getDay() + 6) % 7; // Mon = 0
-  x.setDate(x.getDate() - dow);
-  return x;
-}
 function longDate(d: Date): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -256,10 +236,27 @@ export default function TasksPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const didAutoJumpToPlannedWeek = useRef(false);
+  const didNavigateWeek = useRef(false);
+  const weekRequestId = useRef(0);
+  const activeWeekStartYmd = useRef(ymd(weekStart));
   const initialWeekStartYmd = useRef(ymd(mondayOf(new Date())));
 
   const weekStartYmd = ymd(weekStart);
   const todayYmd = ymd(new Date());
+
+  const navigateToWeek = (date: Date) => {
+    const nextWeek = weekFromDateInput(ymd(date));
+    if (!nextWeek) return;
+    didNavigateWeek.current = true;
+    const nextWeekYmd = ymd(nextWeek);
+    if (nextWeekYmd !== activeWeekStartYmd.current) {
+      // Invalidate immediately, before the effect starts the next request.
+      weekRequestId.current += 1;
+      activeWeekStartYmd.current = nextWeekYmd;
+    }
+    // Also discard a picker draft when explicitly returning to the same week.
+    setWeekStart(nextWeek);
+  };
 
   const subCategoryName = useMemo(() => {
     const map = new Map<string, string>();
@@ -267,24 +264,43 @@ export default function TasksPage() {
     return (id: string | null) => (id ? map.get(id) ?? null : null);
   }, [categories]);
   const loadWeek = useCallback(async () => {
+    // A mutation from a previously displayed week may finish after navigation.
+    if (weekStartYmd !== activeWeekStartYmd.current) return;
+    const requestId = ++weekRequestId.current;
+    const isCurrentRequest = () => requestId === weekRequestId.current;
     setLoading(true);
     setError(null);
+    // Never expose the previous week's data if the selected week fails to load.
+    setTasks([]);
+    setMode("Yellow");
+    setConfidence([]);
     try {
       const [taskList, plan, confidenceList] = await Promise.all([
         apiCall<TaskItem[]>(`/api/tasks?weekStart=${weekStartYmd}`),
         apiCall<WeekPlan>(`/api/week-plans/${weekStartYmd}`).catch(() => null),
         apiCall<WeekConfidenceItem[]>(`/api/week-confidence/${weekStartYmd}`).catch(() => [])
       ]);
+      if (!isCurrentRequest()) return;
       setTasks(taskList);
       setMode(plan?.workloadMode ?? "Yellow");
       setConfidence(confidenceList ?? []);
       if (
         !didAutoJumpToPlannedWeek.current &&
+        !didNavigateWeek.current &&
         weekStartYmd === initialWeekStartYmd.current &&
         taskList.length === 0
       ) {
         didAutoJumpToPlannedWeek.current = true;
-        const allTasks = await apiCall<TaskItem[]>("/api/tasks");
+        let allTasks: TaskItem[];
+        try {
+          allTasks = await apiCall<TaskItem[]>("/api/tasks");
+        } catch (err) {
+          // A same-week choice suppresses this lookup without replacing the
+          // active week's request, so its rejection must also be ignored.
+          if (!isCurrentRequest() || didNavigateWeek.current) return;
+          throw err;
+        }
+        if (!isCurrentRequest() || didNavigateWeek.current) return;
         const targetWeek = [...allTasks]
           .map((task) => task.plannedWeekStart)
           .filter(Boolean)
@@ -295,19 +311,25 @@ export default function TasksPage() {
             .filter(Boolean)
             .sort((a, b) => a.localeCompare(b))[0];
         if (targetWeek && targetWeek !== weekStartYmd) {
+          activeWeekStartYmd.current = targetWeek;
           setWeekStart(parseYmd(targetWeek));
           flash("Showing the next week that has planned tasks.");
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load tasks.");
+      if (isCurrentRequest()) {
+        setError(err instanceof Error ? err.message : "Failed to load tasks.");
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, [weekStartYmd]);
 
   useEffect(() => {
     loadWeek();
+    return () => {
+      weekRequestId.current += 1;
+    };
   }, [loadWeek]);
 
   useEffect(() => {
@@ -496,7 +518,10 @@ export default function TasksPage() {
   }, [confidence]);
 
   const weekEnd = addDays(weekStart, 6);
-  const weekTitle = `Week of ${longDate(weekStart)} – ${longDate(weekEnd)}, ${weekEnd.getFullYear()}`;
+  const startYear = weekStart.getFullYear() !== weekEnd.getFullYear() ? `, ${weekStart.getFullYear()}` : "";
+  const weekTitle = `Week of ${longDate(weekStart)}${startYear} – ${longDate(weekEnd)}, ${weekEnd.getFullYear()}`;
+  const previousWeek = addDays(weekStart, -7);
+  const nextWeek = addDays(weekStart, 7);
 
   const totalActualHours = tasks.reduce((sum, t) => sum + (t.actualHours ?? 0), 0);
 
@@ -533,13 +558,14 @@ export default function TasksPage() {
     );
 
   return (
-    <section className="page">
+    <section className="page tasks-page">
       <div className="card">
         <div className="week-toolbar">
           <div className="week-nav">
-            <button onClick={() => setWeekStart(addDays(weekStart, -7))}>‹ Prev</button>
-            <button onClick={() => setWeekStart(mondayOf(new Date()))}>This Week</button>
-            <button onClick={() => setWeekStart(addDays(weekStart, 7))}>Next ›</button>
+            <button disabled={!weekFromDateInput(ymd(previousWeek))} onClick={() => navigateToWeek(previousWeek)}>‹ Prev</button>
+            <button onClick={() => navigateToWeek(mondayOf(new Date()))}>This Week</button>
+            <button disabled={!weekFromDateInput(ymd(nextWeek))} onClick={() => navigateToWeek(nextWeek)}>Next ›</button>
+            <WeekPicker weekStart={weekStart} onSelect={navigateToWeek} />
           </div>
           <h2 className="week-title">{weekTitle}</h2>
           <div className="inline-actions">
