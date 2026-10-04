@@ -45,7 +45,7 @@ for (const timezone of ["UTC", "America/Los_Angeles", "Asia/Kolkata"]) {
         assert.equal(ymd(weekFromDateInput("2026-03-08")), "2026-03-02");
       });
 
-      await t.test("This Week preserves the local date rather than its UTC date", () => {
+      await t.test("initial week preserves the local date rather than its UTC date", () => {
         const lateSunday = new Date(2026, 9, 4, 23, 45);
         const earlyMonday = new Date(2026, 9, 5, 0, 15);
         assert.equal(ymd(mondayOf(lateSunday)), "2026-09-28");

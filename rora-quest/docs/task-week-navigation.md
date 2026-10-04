@@ -1,17 +1,23 @@
 # Choosing a task week
 
-On **Tasks by Week**, use **Pick week** to choose any date in the week you want
-to view, then select **Show week** (or press Enter in the date field).
+On **Tasks by Week**, choose any date in the week you want to view using the
+date picker. The displayed week and its tasks update immediately; there is no
+separate submit button. The picker has the accessible name **Choose week**.
 
 - Weeks always run **Monday through Sunday**, including weeks that cross a month
-  or year boundary. The picker shows that week's Monday after you apply it.
+  or year boundary. The picker keeps the date you enter so native day, month,
+  and year keyboard editing can continue without resetting to Monday.
 - The date field follows your browser's date format. Dates are interpreted in
   your local timezone, not converted to UTC.
-- **Prev** and **Next** move one week. **This Week** returns to the week containing
-  today's local date. The picker follows all three buttons.
-- Editing or clearing the field does not change the displayed tasks until you
-  submit a valid date. **Show week** is disabled for an empty or invalid date.
-  Use the existing navigation buttons to discard a draft and change weeks.
+- **‹** (Previous week) and **›** (Next week) move exactly one week. Both buttons
+  have accessible names and tooltips, and the picker follows either button.
+  To return to the current week, choose today's date in the picker.
+- Empty or invalid dates do not change the displayed tasks. Selecting a date
+  in the already displayed week keeps that date without reloading data.
+  Use either navigation button to discard an unfinished date and change weeks.
+- Selection refreshes task, workload, and confidence requests using the selected
+  Monday (`weekStart=YYYY-MM-DD` for tasks). The browser remains on `/tasks`,
+  preserving the existing URL behavior; there is no full-page reload.
 - Tasks, workload, and pattern confidence load for the selected week. Your
   Grid/List choice is retained; bulk task selection resets when the week changes.
 - Loading another week clears the previously displayed data. If loading fails,
@@ -68,9 +74,12 @@ dependency is needed.
 
 ## Focused browser regression checks
 
-`source\apps\web\tests\week-navigation.browser.cjs` exercises failed loads,
-canceled auto-jump errors, and picker reachability/touch at 320/375/390px against
-the production UI. Every API request is mocked; no real tasks are changed.
+`source\apps\web\tests\week-navigation.browser.cjs` exercises immediate selection,
+accessible symbol-only controls, request URLs, invalid/empty/same-week no-ops,
+trusted native day/month/year keyboard editing, year boundaries, supported date
+limits, failed loads, canceled auto-jump errors, programmatic picker synchronization,
+and control layout/touch at mobile and desktop widths against the production UI.
+Every API request is mocked; no real tasks are changed.
 
 From `source\apps\web`, run `npm test` and `npm run build`, then start the app
 with `npm run start -- --hostname 127.0.0.1 --port 3137`. In another terminal:

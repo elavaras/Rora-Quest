@@ -13,37 +13,34 @@ export default function WeekPicker({
   const [draftDate, setDraftDate] = useState(() => ymd(weekStart));
 
   useEffect(() => {
-    setDraftDate(ymd(weekStart));
+    setDraftDate((draft) => {
+      const draftWeek = weekFromDateInput(draft);
+      // Keep native edits when their selection comes back from the parent.
+      // Only a different external week should replace the draft with Monday.
+      return draftWeek && ymd(draftWeek) === ymd(weekStart) ? draft : ymd(weekStart);
+    });
   }, [weekStart]);
 
-  const selectedWeek = weekFromDateInput(draftDate);
-
   return (
-    <form
-      className="week-picker"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!selectedWeek) return;
-        setDraftDate(ymd(selectedWeek));
-        onSelect(selectedWeek);
-      }}
-    >
-      <label htmlFor="task-week-date">Pick week</label>
+    <div className="week-picker">
       <input
         id="task-week-date"
         type="date"
         min={MIN_WEEK_DATE}
         max={MAX_WEEK_DATE}
         value={draftDate}
+        aria-label="Choose week"
         aria-describedby="task-week-hint"
-        onChange={(event) => setDraftDate(event.target.value)}
+        onChange={(event) => {
+          const value = event.target.value;
+          const selectedWeek = weekFromDateInput(value);
+          setDraftDate(value);
+          if (selectedWeek) onSelect(selectedWeek);
+        }}
       />
-      <button type="submit" className="secondary" disabled={!selectedWeek}>
-        Show week
-      </button>
       <span id="task-week-hint" className="muted">
         Choose any date. Weeks run Monday–Sunday.
       </span>
-    </form>
+    </div>
   );
 }

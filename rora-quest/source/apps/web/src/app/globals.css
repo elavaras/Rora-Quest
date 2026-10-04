@@ -331,6 +331,10 @@ button.secondary {
 .week-nav button {
   background: var(--color-medium);
   color: #fff;
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 1.25rem;
+  line-height: 1;
 }
 
 .week-picker {
@@ -339,10 +343,6 @@ button.secondary {
   align-items: center;
   gap: 8px;
   max-width: 100%;
-}
-
-.week-picker label {
-  margin: 0;
 }
 
 .week-picker input {

@@ -249,12 +249,11 @@ export default function TasksPage() {
     if (!nextWeek) return;
     didNavigateWeek.current = true;
     const nextWeekYmd = ymd(nextWeek);
-    if (nextWeekYmd !== activeWeekStartYmd.current) {
-      // Invalidate immediately, before the effect starts the next request.
-      weekRequestId.current += 1;
-      activeWeekStartYmd.current = nextWeekYmd;
-    }
-    // Also discard a picker draft when explicitly returning to the same week.
+    // A same-week choice cancels auto-jump without navigating or reloading.
+    if (nextWeekYmd === activeWeekStartYmd.current) return;
+    // Invalidate immediately, before the effect starts the next request.
+    weekRequestId.current += 1;
+    activeWeekStartYmd.current = nextWeekYmd;
     setWeekStart(nextWeek);
   };
 
@@ -562,9 +561,24 @@ export default function TasksPage() {
       <div className="card">
         <div className="week-toolbar">
           <div className="week-nav">
-            <button disabled={!weekFromDateInput(ymd(previousWeek))} onClick={() => navigateToWeek(previousWeek)}>‹ Prev</button>
-            <button onClick={() => navigateToWeek(mondayOf(new Date()))}>This Week</button>
-            <button disabled={!weekFromDateInput(ymd(nextWeek))} onClick={() => navigateToWeek(nextWeek)}>Next ›</button>
+            <button
+              type="button"
+              aria-label="Previous week"
+              title="Previous week"
+              disabled={!weekFromDateInput(ymd(previousWeek))}
+              onClick={() => navigateToWeek(previousWeek)}
+            >
+              <span aria-hidden="true">‹</span>
+            </button>
+            <button
+              type="button"
+              aria-label="Next week"
+              title="Next week"
+              disabled={!weekFromDateInput(ymd(nextWeek))}
+              onClick={() => navigateToWeek(nextWeek)}
+            >
+              <span aria-hidden="true">›</span>
+            </button>
             <WeekPicker weekStart={weekStart} onSelect={navigateToWeek} />
           </div>
           <h2 className="week-title">{weekTitle}</h2>
