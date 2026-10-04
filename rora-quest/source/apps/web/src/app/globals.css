@@ -484,11 +484,14 @@ button.secondary {
 }
 
 .task-card {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
+  overflow-wrap: anywhere;
   background: var(--bg-task-card);
 }
 
@@ -543,7 +546,8 @@ button.secondary {
   align-items: center;
 }
 .card-actions select {
-  width: auto;
+  width: 100%;
+  min-width: 0;
   padding: 4px 6px;
   font-size: 11px;
 }

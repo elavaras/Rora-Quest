@@ -27,6 +27,45 @@ to view, then select **Show week** (or press Enter in the date field).
 This only changes which week you view; it does not move tasks or change their
 schedules.
 
+## Task tile layout
+
+### Requirements (PRD)
+
+The reported Tasks by Week bug shows a completed "Minimum Window Substring"
+task with its progress bar and **Move to** dropdown extending beyond Tuesday
+into Wednesday.
+
+Acceptance criteria:
+
+1. Every scheduled tile, its progress bar, and its closed move dropdown stay
+   inside the day column, including at the grid's 150px minimum column width.
+2. Long titles and subcategory names wrap without hiding text or widening the
+   tile. Progress remains accurate for 0%, partially complete, and 100% tasks.
+3. Normal and bulk-selection tiles remain contained in light and dark themes.
+   The shared unscheduled tiles retain their layout and move controls.
+4. Same-week moves, cross-week confirmation, task links, and Grid/List switching
+   retain their existing behavior. Narrow screens retain horizontal grid
+   scrolling rather than shrinking all seven days into the viewport.
+
+Scope is tile sizing only: no API, scheduling, authentication, or data changes.
+
+### Layout design
+
+The task card's implicit grid column takes its minimum width from its contents,
+including the move dropdown's longest option. This makes the progress track and
+dropdown wider than the visible card.
+
+Use a single `minmax(0, 1fr)` card column, let the card shrink inside the
+bulk-selection flex row, and give its dropdown `width: 100%` and `min-width: 0`.
+Allow text to wrap anywhere when a word cannot otherwise fit. Do not clip the
+card or hide overflow; links, text, and native dropdown options must stay usable.
+Keep the seven-day grid widths and all task handlers unchanged.
+
+Validate rendered element bounds against card and day padding, progress-fill
+ratios, long-text wrapping, selection mode, and mocked move interactions. Use
+the existing optional Playwright/installed-browser approach; no application
+dependency is needed.
+
 ## Focused browser regression checks
 
 `source\apps\web\tests\week-navigation.browser.cjs` exercises failed loads,
@@ -50,3 +89,15 @@ node tests\week-navigation.browser.cjs
 
 `WEEK_TEST_ORIGIN` can override the default `http://127.0.0.1:3137`.
 These are browser-emulated touch checks, not physical-device or live-backend tests.
+
+Run `node tests\task-tile-layout.browser.cjs` with the same server and browser
+tooling for the tile-layout regression suite. It covers light/dark themes at
+320/390/768/1280/1920px, normal and bulk-selection tiles (including unscheduled
+tasks), long text, 0/50/100% progress, same-week moves, previous/next-week
+confirmation and cancellation, task link targets, and Grid/List switching.
+The assertions measure rendered bounds and fill widths rather than checking
+for particular CSS declarations. All API traffic is mocked.
+
+Set `TASK_TILE_SCREENSHOT_DIR` to save a desktop dark-theme grid screenshot
+outside the repository. Native dropdown popup rendering and physical-device
+interaction are not covered by these checks.
