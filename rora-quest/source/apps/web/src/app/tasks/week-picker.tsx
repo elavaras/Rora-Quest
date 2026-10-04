@@ -30,7 +30,6 @@ export default function WeekPicker({
         max={MAX_WEEK_DATE}
         value={draftDate}
         aria-label="Choose week"
-        aria-describedby="task-week-hint"
         onChange={(event) => {
           const value = event.target.value;
           const selectedWeek = weekFromDateInput(value);
@@ -38,9 +37,6 @@ export default function WeekPicker({
           if (selectedWeek) onSelect(selectedWeek);
         }}
       />
-      <span id="task-week-hint" className="muted">
-        Choose any date. Weeks run Monday–Sunday.
-      </span>
     </div>
   );
 }
