@@ -270,6 +270,10 @@ export default function TasksPage() {
     const isCurrentRequest = () => requestId === weekRequestId.current;
     setLoading(true);
     setError(null);
+    // Never expose the previous week's data if the selected week fails to load.
+    setTasks([]);
+    setMode("Yellow");
+    setConfidence([]);
     try {
       const [taskList, plan, confidenceList] = await Promise.all([
         apiCall<TaskItem[]>(`/api/tasks?weekStart=${weekStartYmd}`),
@@ -287,7 +291,15 @@ export default function TasksPage() {
         taskList.length === 0
       ) {
         didAutoJumpToPlannedWeek.current = true;
-        const allTasks = await apiCall<TaskItem[]>("/api/tasks");
+        let allTasks: TaskItem[];
+        try {
+          allTasks = await apiCall<TaskItem[]>("/api/tasks");
+        } catch (err) {
+          // A same-week choice suppresses this lookup without replacing the
+          // active week's request, so its rejection must also be ignored.
+          if (!isCurrentRequest() || didNavigateWeek.current) return;
+          throw err;
+        }
         if (!isCurrentRequest() || didNavigateWeek.current) return;
         const targetWeek = [...allTasks]
           .map((task) => task.plannedWeekStart)
@@ -546,7 +558,7 @@ export default function TasksPage() {
     );
 
   return (
-    <section className="page">
+    <section className="page tasks-page">
       <div className="card">
         <div className="week-toolbar">
           <div className="week-nav">
