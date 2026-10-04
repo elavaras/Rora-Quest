@@ -3,6 +3,8 @@
 On **Tasks by Week**, choose any date in the week you want to view using the
 date picker. The displayed week and its tasks update immediately; there is no
 separate submit button. The picker has the accessible name **Choose week**.
+The picker and both week-navigation arrows share a compact, vertically aligned
+row, without a visible label or helper sentence.
 
 - Weeks always run **Monday through Sunday**, including weeks that cross a month
   or year boundary. The picker keeps the date you enter so native day, month,

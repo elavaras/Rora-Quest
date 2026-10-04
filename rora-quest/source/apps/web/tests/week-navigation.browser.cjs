@@ -147,7 +147,9 @@ async function focusDateSegment(input, segment) {
       await assertWeek(page, initialWeek);
       const input = page.getByLabel("Choose week", { exact: true });
       assert.equal(await input.getAttribute("type"), "date");
-      assert.equal(await input.getAttribute("aria-describedby"), "task-week-hint");
+      assert.equal(await input.getAttribute("aria-describedby"), null);
+      assert.equal(await page.locator("#task-week-hint").count(), 0);
+      assert.equal(await page.getByText("Choose any date. Weeks run Monday–Sunday.", { exact: true }).count(), 0);
       assert.equal(await input.getAttribute("min"), "0001-01-01");
       assert.equal(await input.getAttribute("max"), "9999-12-26");
       assert.equal(await page.locator(".week-picker label, form.week-picker, .week-picker button").count(), 0);
@@ -367,25 +369,33 @@ async function focusDateSegment(input, segment) {
       assert.deepEqual(apiRequests.slice(requestOffset).sort(), weekRequests(targetWeek));
     });
 
-    for (const width of [320, 375, 390, 768, 1440]) {
+    for (const width of [320, 375, 390, 720, 1440]) {
       await check(`week controls fit and work at ${width}px`, { width }, async ({ page }) => {
         await page.goto(`${origin}/tasks`);
         await page.locator(".t-title").first().waitFor();
         await page.locator(".week-toolbar").scrollIntoViewIfNeeded();
         const geometry = await page.evaluate(() => ({
           width: window.innerWidth,
+          height: window.innerHeight,
           documentWidth: document.documentElement.scrollWidth,
           controls: [...document.querySelectorAll(".week-nav button, .week-picker input")].map((element) => {
             const rect = element.getBoundingClientRect();
             return { left: rect.left, right: rect.right, width: rect.width, height: rect.height,
+              top: rect.top, bottom: rect.bottom, centerY: rect.top + rect.height / 2,
               button: element.tagName === "BUTTON" };
           })
         }));
         assert.ok(geometry.documentWidth <= width, JSON.stringify(geometry));
+        assert.equal(geometry.controls.length, 3);
+        const centers = geometry.controls.map((control) => control.centerY);
+        assert.ok(Math.max(...centers) - Math.min(...centers) <= 1,
+          `Controls must share one centered row: ${JSON.stringify(geometry)}`);
         for (const control of geometry.controls) {
           assert.ok(control.left >= 0 && control.right <= geometry.width, JSON.stringify(control));
+          assert.ok(control.top >= 0 && control.bottom <= geometry.height, JSON.stringify(control));
+          assert.ok(control.height >= 44, JSON.stringify(control));
           if (control.button) {
-            assert.ok(control.width >= 44 && control.height >= 44, JSON.stringify(control));
+            assert.ok(control.width >= 44, JSON.stringify(control));
           }
         }
         await choose(page, "2027-06-10", width < 720);
