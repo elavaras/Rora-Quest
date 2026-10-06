@@ -93,12 +93,13 @@ body {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   min-height: 100vh;
 }
 
 .main-shell {
   display: grid;
+  min-width: 0;
   grid-template-rows: auto 1fr;
   min-height: 100vh;
 }
@@ -134,54 +135,128 @@ body {
 .top-bar {
   display: flex;
   justify-content: flex-end;
-  align-items: flex-start;
+  align-items: center;
   padding: 12px 24px 0;
 }
 
-.user-switcher {
-  padding: 10px 12px;
-  border: 1px solid var(--border-input);
-  border-radius: 10px;
-  background: var(--bg-surface);
-  min-width: 260px;
+.account-navigation {
+  position: relative;
 }
 
-.user-switcher-title {
-  margin: 0;
-  color: var(--color-medium);
+.account-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 5px 8px 5px 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--color-text);
+}
+
+.account-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-pill);
+  color: var(--color-pill);
   font-weight: 700;
   font-size: 13px;
 }
 
-.user-switcher-current {
-  margin: 6px 0 10px;
-  color: var(--color-text);
-  font-size: 13px;
-  word-break: break-word;
+.account-menu-trigger[aria-expanded="true"] .account-chevron {
+  transform: rotate(180deg);
 }
 
-.user-switcher-sub {
-  margin: -4px 0 0;
+.account-menu-trigger:hover,
+.account-menu-trigger[aria-expanded="true"] {
+  background: var(--bg-back-btn-hover);
+}
+
+.account-menu-trigger:focus-visible,
+.account-sign-in:focus-visible,
+.account-menu-item:focus-visible {
+  outline: 2px solid var(--color-pill);
+  outline-offset: 2px;
+}
+
+.account-status,
+.account-sign-in {
+  display: flex;
+  align-items: center;
+  height: 44px;
+}
+
+.account-status {
+  font-size: 13px;
+}
+
+.account-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: min(280px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.account-menu-identity {
+  padding: 10px 10px 14px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.account-menu-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.account-menu-detail {
+  margin: 4px 0 0;
   font-size: 12px;
 }
 
-.user-switcher input {
-  margin-top: 8px;
-}
-
-.user-switcher-authenticated {
+.account-menu-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  text-decoration: none;
+  font-size: 14px;
 }
 
-.user-switcher-actions {
-  margin-top: 8px;
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
+.account-menu-item:hover,
+.account-menu-item:focus-visible {
+  background: var(--bg-back-btn-hover);
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar nav {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .top-bar {
+    padding-inline: 16px;
+  }
 }
 
 .content {
@@ -359,24 +434,14 @@ button.secondary {
 
 /* Keep the week controls reachable without changing other screens' layouts. */
 @media (max-width: 720px) {
-  .app-shell:has(.tasks-page),
   .app-shell:has(.tasks-page) .main-shell,
   .tasks-page {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .app-shell:has(.tasks-page) .sidebar nav {
-    display: flex;
-    flex-wrap: wrap;
-  }
-
   .app-shell:has(.tasks-page) .content {
     min-width: 0;
     padding: 16px;
-  }
-
-  .app-shell:has(.tasks-page) .top-bar {
-    padding-inline: 16px;
   }
 
   .tasks-page .inline-actions {
