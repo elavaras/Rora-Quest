@@ -29,11 +29,24 @@ row, without a visible label or helper sentence.
   week with planned tasks. Once you explicitly choose a week, an empty week
   remains selected rather than redirecting. Late errors from that canceled
   automatic lookup are ignored too.
-- On narrow screens, the sidebar navigation moves above Tasks by Week and the
-  week controls wrap to fit. The seven-day task grid can still scroll horizontally.
+- On narrow screens, the sidebar navigation moves above the page on all screens,
+  keeping the top-right account control reachable. The week controls wrap to fit,
+  and the seven-day task grid can still scroll horizontally.
 
 This only changes which week you view; it does not move tasks or change their
 schedules.
+
+## Account navigation
+
+The top-right initials button opens an account menu with the signed-in user's
+name/email, **Settings**, and **Sign out**. Account details remain hidden when
+the menu is closed, and opening it does not move the page content. Signed-out
+users see **Sign in**, which continues to use the existing Microsoft sign-in
+flow and returns to the current page.
+
+Use Enter, Space, or the arrow keys to open the menu, arrows or Home/End to move
+between its actions, and Escape to close it and return focus to the button.
+Tab, clicking outside, or navigating away also closes the menu.
 
 ## Task tile layout
 
@@ -112,3 +125,11 @@ for particular CSS declarations. All API traffic is mocked.
 Set `TASK_TILE_SCREENSHOT_DIR` to save a desktop dark-theme grid screenshot
 outside the repository. Native dropdown popup rendering and physical-device
 interaction are not covered by these checks.
+
+Run `node tests\user-navigation.browser.cjs` with the same server and optional
+browser tooling for the shared account menu. It covers signed-in/out/loading
+states, identity fallbacks, keyboard and touch interaction, dismissal/navigation,
+unchanged login/logout destinations, long names/emails, and 320-1920px layouts
+in light/dark themes. All API requests and authentication redirects are mocked.
+`USER_NAV_TEST_ORIGIN` and `USER_NAV_TEST_BROWSER` override the server and browser;
+`USER_NAV_SCREENSHOT_DIR` optionally saves screenshots outside the repository.
