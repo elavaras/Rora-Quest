@@ -14,7 +14,7 @@ using NpgsqlTypes;
 /// whole-aggregate replacement is simple and correct.
 /// </para>
 /// </summary>
-public sealed class PostgresRoraQuestStore : IRoraQuestStore
+public sealed partial class PostgresRoraQuestStore : IRoraQuestStore
 {
     private readonly NpgsqlDataSource _dataSource;
 
@@ -32,26 +32,31 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
         DefaultTypeMap.MatchNamesWithUnderscores = true;
     }
 
-    public PostgresRoraQuestStore(NpgsqlDataSource dataSource)
+    public PostgresRoraQuestStore(NpgsqlDataSource dataSource, ProgressLedger progress)
     {
         _dataSource = dataSource;
+        Progress = progress;
     }
 
     public UserData Load(string userId)
     {
-        if (_cache.TryGetValue(userId, out var cached))
+        Progress.AssertOwnerAvailable(userId);
+        var conn = OwnerConnection(userId);
+        var revision = Progress.Revision(conn, userId);
+        if (!Progress.IsSuspended(conn) && _revisions.GetValueOrDefault(userId, -1) == revision && _cache.TryGetValue(userId, out var cached))
         {
             return cached;
         }
 
         var hydrated = HydrateFromDb(userId);
         _cache[userId] = hydrated;
+        _revisions[userId] = revision;
         return hydrated;
     }
 
     private UserData HydrateFromDb(string userId)
     {
-        using var conn = _dataSource.OpenConnection();
+        var conn = OwnerConnection(userId);
         var data = new UserData();
         var arg = new { u = userId };
 
@@ -309,7 +314,9 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
     {
         try
         {
-            Persist(userId, data);
+            using var write = BeginWrite(userId);
+            Persist(userId, data, write.Connection, write.Transaction);
+            write.Commit();
             // Persistence succeeded: the mutated aggregate is now the source of truth in memory too.
             _cache[userId] = data;
         }
@@ -330,12 +337,14 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
         // Targeted delete: remove only the selected task rows. task_sub_steps and
         // task_reference_links cascade via ON DELETE CASCADE, so this is a single round-trip
         // instead of re-persisting the whole user aggregate (hundreds of row inserts).
-        using var conn = _dataSource.OpenConnection();
+        using var write = BeginWrite(userId);
+        var conn = write.Connection;
         using var cmd = new NpgsqlCommand(
-            "DELETE FROM task_items WHERE user_id = @u AND id = ANY(@ids)", conn);
+            "DELETE FROM task_items WHERE user_id = @u AND id = ANY(@ids)", conn, write.Transaction);
         cmd.Parameters.AddWithValue("u", userId);
         cmd.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid) { Value = ids });
         var removed = cmd.ExecuteNonQuery();
+        write.Commit();
 
         // Keep the write-through cache consistent even if the caller mutated a different
         // reference (defensive; normally the cached graph IS the one the service mutated).
@@ -348,8 +357,9 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
 
     public void SaveNotificationSettings(string userId, NotificationSettings settings)
     {
-        using var conn = _dataSource.OpenConnection();
-        using var tx = conn.BeginTransaction();
+        using var write = BeginWrite(userId);
+        var conn = write.Connection;
+        var tx = write.Transaction;
         EnsureUserExists(conn, tx, userId);
 
         Exec(conn, tx,
@@ -368,13 +378,14 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                 p.AddWithValue("teams", settings.TeamsDestination);
             });
 
-        tx.Commit();
+        write.Commit();
     }
 
     public void UpsertIntegration(string userId, IntegrationSetting setting)
     {
-        using var conn = _dataSource.OpenConnection();
-        using var tx = conn.BeginTransaction();
+        using var write = BeginWrite(userId);
+        var conn = write.Connection;
+        var tx = write.Transaction;
         EnsureUserExists(conn, tx, userId);
 
         // Keep exactly one row per provider for the user (historical schema allows multiple accounts).
@@ -405,13 +416,14 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                 p.AddWithValue("sync", setting.LastSyncAt);
             });
 
-        tx.Commit();
+        write.Commit();
     }
 
     public bool DisconnectIntegration(string userId, string provider)
     {
-        using var conn = _dataSource.OpenConnection();
-        using var tx = conn.BeginTransaction();
+        using var write = BeginWrite(userId);
+        var conn = write.Connection;
+        var tx = write.Transaction;
         var now = DateTimeOffset.UtcNow;
         using var cmd = new NpgsqlCommand(
             @"UPDATE integration_settings
@@ -424,7 +436,7 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
         cmd.Parameters.AddWithValue("u", userId);
         cmd.Parameters.AddWithValue("p", provider);
         var affected = cmd.ExecuteNonQuery();
-        tx.Commit();
+        write.Commit();
 
         if (affected > 0 && _cache.TryGetValue(userId, out var cached))
         {
@@ -442,8 +454,9 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
 
     public void AddNotificationSchedule(string userId, NotificationSchedule schedule)
     {
-        using var conn = _dataSource.OpenConnection();
-        using var tx = conn.BeginTransaction();
+        using var write = BeginWrite(userId);
+        var conn = write.Connection;
+        var tx = write.Transaction;
         EnsureUserExists(conn, tx, userId);
 
         Exec(conn, tx,
@@ -460,7 +473,7 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                 p.AddWithValue("sent", (object?)schedule.SentAt ?? DBNull.Value);
             });
 
-        tx.Commit();
+        write.Commit();
     }
 
     public IReadOnlyCollection<string> GetKnownUserIds()
@@ -478,10 +491,8 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
             p => p.AddWithValue("id", userId));
     }
 
-    private void Persist(string userId, UserData data)
+    private void Persist(string userId, UserData data, NpgsqlConnection conn, NpgsqlTransaction tx)
     {
-        using var conn = _dataSource.OpenConnection();
-        using var tx = conn.BeginTransaction();
 
         // Ensure users exist for the owner and every distinct assignee (FK targets).
         var userIds = new HashSet<string>(StringComparer.Ordinal) { userId };
@@ -870,7 +881,6 @@ public sealed class PostgresRoraQuestStore : IRoraQuestStore
                 });
         }
 
-        tx.Commit();
     }
 
     private static void Exec(NpgsqlConnection conn, NpgsqlTransaction tx, string sql, Action<NpgsqlParameterCollection> bind)

@@ -1,0 +1,74 @@
+{
+  "asOfUtc": "2026-10-06T06:31:00.000000Z",
+  "snapshotSequence": "1",
+  "timeZone": "Asia/Kolkata",
+  "today": "2026-10-06",
+  "nextMidnightUtc": "2026-10-06T18:30:00.000000Z",
+  "from": "2026-10-06",
+  "to": "2026-10-06",
+  "selectedDate": "2026-10-06",
+  "isDefaultRange": false,
+  "coverage": {
+    "trackingStartedAtUtc": "2026-10-01T04:30:00.000000Z",
+    "captureReliableNow": true,
+    "hasInterruptions": false
+  },
+  "days": [{
+    "date": "2026-10-06", "position": "today", "status": "active",
+    "coverage": "reliableSoFar", "coverageReasons": ["dayInProgress"],
+    "unitCount": 1, "taskCount": 0, "substepCount": 1, "substepTaskCount": 1
+  }],
+  "participation": {
+    "activeDays": 1, "fullyTrackedElapsedDays": 0,
+    "unknownOrPartialElapsedDays": 0, "includesToday": true, "futureDays": 0
+  },
+  "longestGap": {
+    "scope": "selectedRange", "state": "insufficientCoverage",
+    "days": null, "from": null, "to": null, "boundaries": []
+  },
+  "currentGap": {
+    "scope": "allReliableHistory", "state": "none", "days": 0,
+    "from": null, "to": null, "throughDate": "2026-10-05", "lowerBound": false, "reason": "activityToday"
+  },
+  "lastActivity": {
+    "scope": "allRecordedHistory", "state": "recorded",
+    "event": {
+      "unitKey": "substep:11111111-1111-1111-1111-111111111111:22222222-2222-2222-2222-222222222222",
+      "sequence": "1", "kind": "substep",
+      "occurredAtUtc": "2026-10-06T06:30:00.000000Z",
+      "occurredAtLocal": "2026-10-06T12:00:00.000000+05:30", "localDate": "2026-10-06",
+      "taskId": "11111111-1111-1111-1111-111111111111",
+      "substepId": "22222222-2222-2222-2222-222222222222",
+      "taskTitle": "Practice graph traversal", "substepTitle": "Trace the algorithm",
+      "availability": "available", "taskHref": "/tasks/11111111-1111-1111-1111-111111111111"
+    }
+  },
+  "selectedDay": {
+    "date": "2026-10-06", "timeZone": "Asia/Kolkata",
+    "asOfUtc": "2026-10-06T06:31:00.000000Z", "snapshotSequence": "1", "totalCount": 1,
+    "events": [{
+      "unitKey": "substep:11111111-1111-1111-1111-111111111111:22222222-2222-2222-2222-222222222222",
+      "sequence": "1", "kind": "substep",
+      "occurredAtUtc": "2026-10-06T06:30:00.000000Z",
+      "occurredAtLocal": "2026-10-06T12:00:00.000000+05:30", "localDate": "2026-10-06",
+      "taskId": "11111111-1111-1111-1111-111111111111",
+      "substepId": "22222222-2222-2222-2222-222222222222",
+      "taskTitle": "Practice graph traversal", "substepTitle": "Trace the algorithm",
+      "availability": "available", "taskHref": "/tasks/11111111-1111-1111-1111-111111111111"
+    }],
+    "nextCursor": null
+  },
+  "weeklyPlan": {
+    "weekStart": "2026-10-05", "weekEnd": "2026-10-11",
+    "asOfUtc": "2026-10-06T06:31:00.000000Z", "extendsOutsideRange": true,
+    "totalTasks": 1, "completeTasks": 0, "progressPercent": 25,
+    "tasksHref": "/tasks?weekStart=2026-10-05",
+    "tasks": [{
+      "taskId": "11111111-1111-1111-1111-111111111111", "title": "Practice graph traversal",
+      "status": "Todo", "plannedWeekStart": "2026-10-05", "plannedDate": "2026-10-06",
+      "taskHref": "/tasks/11111111-1111-1111-1111-111111111111",
+      "progressPercent": 25, "isComplete": false, "progressBasis": "weightedSubsteps",
+      "doneWeight": 1, "totalWeight": 4, "doneSubsteps": 1, "totalSubsteps": 2
+    }]
+  }
+}

@@ -5,7 +5,7 @@ export default function HomePage() {
         <h2>Welcome to Rora Quest</h2>
         <p className="muted">
           The app shell is now active. Use the left navigation to access checklist intake,
-          tasks, dashboard, scorecard, tracking, and settings.
+          tasks, dashboard, recorded progress, and settings.
         </p>
       </div>
       <div className="grid-3">

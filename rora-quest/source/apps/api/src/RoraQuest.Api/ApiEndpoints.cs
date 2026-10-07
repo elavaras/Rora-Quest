@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using RoraQuest.Api.Progress;
 
 public static class ApiEndpoints
 {
@@ -24,6 +25,7 @@ public static class ApiEndpoints
         MapNotifications(api);
         MapIntegrationSettings(api);
         MapReports(api);
+        ProgressEndpoints.Map(api);
     }
 
     private static void MapAuth(RouteGroupBuilder auth, bool oauthEnabled)
@@ -480,7 +482,7 @@ public sealed class AppState
 public sealed class UserData
 {
     public Dictionary<Guid, Category> Categories { get; } = new();
-    public Dictionary<Guid, TaskItem> Tasks { get; } = new();
+    public Dictionary<Guid, TaskItem> Tasks { get; private set; } = new();
     public Dictionary<Guid, ChecklistImport> Imports { get; } = new();
     public Dictionary<Guid, WeekConfidenceItem> ConfidenceItems { get; } = new();
     public Dictionary<DateOnly, WeekPlan> WeekPlans { get; } = new();
@@ -488,9 +490,16 @@ public sealed class UserData
     public Dictionary<string, IntegrationSetting> Integrations { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<NotificationSchedule> NotificationSchedules { get; } = [];
     public NotificationSettings NotificationSettings { get; set; } = new();
+
+    internal UserData WithTasks(Dictionary<Guid, TaskItem> tasks)
+    {
+        var copy = (UserData)MemberwiseClone();
+        copy.Tasks = tasks;
+        return copy;
+    }
 }
 
-public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? assetStorage = null)
+public sealed partial class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? assetStorage = null)
 {
     private readonly ITaskAssetStorage _assetStorage = assetStorage ?? new NullTaskAssetStorage();
     private readonly object _gate = new();
@@ -510,7 +519,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public ChecklistImport CreateChecklistImport(string userId, BulkChecklistImportRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var draftItems = new List<ChecklistDraftItem>();
@@ -591,7 +600,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object? CommitChecklistImport(string userId, Guid importId, List<Guid>? selectedDraftIds, List<Guid>? selectedConfidenceIds, DateOnly? startWeekDate = null)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Imports.TryGetValue(importId, out var import))
@@ -722,7 +731,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public List<WeekConfidenceItem> GetWeekConfidence(string userId, DateOnly weekStart)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var items = user.ConfidenceItems.Values
@@ -793,7 +802,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public WeekConfidenceItem? ToggleWeekConfidence(string userId, Guid itemId, bool isDone)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.ConfidenceItems.TryGetValue(itemId, out var item))
@@ -810,7 +819,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public ChecklistImport? GetChecklistImport(string userId, Guid importId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             return GetUser(userId).Imports.GetValueOrDefault(importId);
         }
@@ -818,12 +827,12 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public List<Category> GetCategories(string userId)
     {
-        lock (_gate) return GetUser(userId).Categories.Values.OrderBy(x => x.Name).ToList();
+        using (EnterOwnerScope(userId)) return GetUser(userId).Categories.Values.OrderBy(x => x.Name).ToList();
     }
 
     public Category CreateCategory(string userId, CreateCategoryRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var item = new Category
@@ -842,7 +851,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public Category? UpdateCategory(string userId, Guid categoryId, UpdateCategoryRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Categories.TryGetValue(categoryId, out var item))
@@ -862,7 +871,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public bool DeleteCategory(string userId, Guid categoryId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var removed = user.Categories.Remove(categoryId);
@@ -873,7 +882,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object GetCategoryTree(string userId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var cats = GetUser(userId).Categories.Values.ToList();
             return cats.Select(c => new
@@ -888,7 +897,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public List<TaskItem> GetTasks(string userId, TaskQuery query)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             HealDuplicateTasks(user, userId);
@@ -917,7 +926,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public WeekActualHoursSummary GetWeekActualHoursSummary(string userId, DateOnly weekStart)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var weekEnd = weekStart.AddDays(6);
@@ -949,6 +958,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
             return;
         }
 
+        var tasks = new Dictionary<Guid, TaskItem>(user.Tasks);
         foreach (var group in groups)
         {
             var keep = group
@@ -957,16 +967,18 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
                 .First();
             foreach (var dup in group.Where(t => t.Id != keep.Id))
             {
-                user.Tasks.Remove(dup.Id);
+                tasks.Remove(dup.Id);
             }
         }
 
-        store.Save(userId, user);
+        var prospective = user.WithTasks(tasks);
+        store.Save(userId, prospective);
+        foreach (var id in user.Tasks.Keys.Except(tasks.Keys).ToArray()) user.Tasks.Remove(id);
     }
 
     public TaskItem CreateTask(string userId, CreateTaskRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var task = new TaskItem
@@ -1032,38 +1044,36 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public TaskItem? GetTask(string userId, Guid taskId)
     {
-        lock (_gate) return GetUser(userId).Tasks.GetValueOrDefault(taskId);
+        using (EnterOwnerScope(userId)) return GetUser(userId).Tasks.GetValueOrDefault(taskId);
     }
 
     public bool DeleteTask(string userId, Guid taskId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
-            if (!user.Tasks.Remove(taskId)) return false;
+            if (!user.Tasks.ContainsKey(taskId)) return false;
             store.DeleteTasks(userId, new[] { taskId });
+            user.Tasks.Remove(taskId);
             return true;
         }
     }
 
     public int DeleteTasks(string userId, IReadOnlyCollection<Guid> taskIds)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
-            var removedIds = new List<Guid>(taskIds.Count);
-            foreach (var id in taskIds)
-            {
-                if (user.Tasks.Remove(id)) removedIds.Add(id);
-            }
+            var removedIds = taskIds.Distinct().Where(user.Tasks.ContainsKey).ToList();
             if (removedIds.Count > 0) store.DeleteTasks(userId, removedIds);
+            foreach (var id in removedIds) user.Tasks.Remove(id);
             return removedIds.Count;
         }
     }
 
     public ServiceResult<TaskItem> UpdateTask(string userId, Guid taskId, UpdateTaskRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskItem>.NotFound();
@@ -1110,7 +1120,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public ServiceResult<TaskItem> UpdateTaskStatus(string userId, Guid taskId, UpdateTaskStatusRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskItem>.NotFound();
@@ -1126,18 +1136,26 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
                 return ServiceResult<TaskItem>.Validation("All substeps must be completed to mark task Done.");
             }
 
-            task.Status = req.Status;
-            task.UpdatedAt = DateTimeOffset.UtcNow;
-            task.RowVersion++;
-            task.StatusEvents.Add(new TaskStatusEvent(Guid.NewGuid(), old, req.Status, DateTimeOffset.UtcNow));
-            store.Save(userId, user);
+            var staged = task.CopyForProgressMutation();
+            var now = store.Progress.Now;
+            staged.Status = req.Status;
+            staged.UpdatedAt = now;
+            staged.RowVersion++;
+            staged.StatusEvents.Add(new TaskStatusEvent(Guid.NewGuid(), old, req.Status, now));
+            var unit = old != TaskStatus.Done && req.Status == TaskStatus.Done && task.SubSteps.Count == 0
+                ? ProgressUnit.Task(staged, now) : null;
+            if (!CommitProgressMutation(userId, user, task, staged, unit, now))
+            {
+                var latest = GetUser(userId).Tasks.GetValueOrDefault(taskId);
+                return latest is null ? ServiceResult<TaskItem>.NotFound() : ServiceResult<TaskItem>.Ok(latest);
+            }
             return ServiceResult<TaskItem>.Ok(task);
         }
     }
 
     public List<TaskSubStep>? GetSubsteps(string userId, Guid taskId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var task = GetUser(userId).Tasks.GetValueOrDefault(taskId);
             return task?.SubSteps.OrderBy(x => x.OrderIndex).ToList();
@@ -1146,7 +1164,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public ServiceResult<TaskSubStep> CreateSubstep(string userId, Guid taskId, CreateSubstepRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskSubStep>.NotFound();
@@ -1165,7 +1183,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public ServiceResult<TaskSubStep> UpdateSubstep(string userId, Guid taskId, Guid subStepId, UpdateSubstepRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskSubStep>.NotFound();
@@ -1185,7 +1203,11 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
                 return ServiceResult<TaskSubStep>.Ok(sub);
             }
 
-            var now = DateTimeOffset.UtcNow;
+            var liveTask = task;
+            var liveSub = sub;
+            task = task.CopyForProgressMutation();
+            sub = task.SubSteps.Single(s => s.Id == subStepId);
+            var now = store.Progress.Now;
             if (titleChanged) sub.Title = title!;
 
             TaskStatus? automaticStatus = null;
@@ -1216,14 +1238,19 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
             sub.RowVersion++;
             task.UpdatedAt = now;
             task.RowVersion++;
-            store.Save(userId, user);
-            return ServiceResult<TaskSubStep>.Ok(sub);
+            var unit = completionChanged && sub.IsDone ? ProgressUnit.Substep(task, sub, now) : null;
+            if (!CommitProgressMutation(userId, user, liveTask, task, unit, now))
+            {
+                var latest = GetUser(userId).Tasks.GetValueOrDefault(taskId)?.SubSteps.FirstOrDefault(s => s.Id == subStepId);
+                return latest is null ? ServiceResult<TaskSubStep>.NotFound() : ServiceResult<TaskSubStep>.Ok(latest);
+            }
+            return ServiceResult<TaskSubStep>.Ok(liveSub);
         }
     }
 
     public bool DeleteSubstep(string userId, Guid taskId, Guid subStepId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return false;
@@ -1239,7 +1266,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public ServiceResult<TaskLink> CreateLink(string userId, Guid taskId, CreateLinkRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskLink>.NotFound();
@@ -1253,7 +1280,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public ServiceResult<TaskLink> UpdateLink(string userId, Guid taskId, Guid linkId, UpdateLinkRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return ServiceResult<TaskLink>.NotFound();
@@ -1270,7 +1297,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public bool DeleteLink(string userId, Guid taskId, Guid linkId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return false;
@@ -1365,7 +1392,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
     public async Task<bool> DeleteAssetAsync(string userId, Guid taskId, Guid assetId, CancellationToken cancellationToken = default)
     {
         string? storagePathOrUrl = null;
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task))
@@ -1387,7 +1414,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
             await _assetStorage.DeleteAsync(storagePathOrUrl, cancellationToken).ConfigureAwait(false);
         }
 
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task))
@@ -1416,7 +1443,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
         string? contentType,
         long? sizeBytes)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task))
@@ -1473,7 +1500,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object MoveSpillover(string userId, SpilloverRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var moved = new List<object>();
@@ -1500,7 +1527,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public List<object> GetSpilloverHistory(string userId, Guid? taskId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var tasks = taskId is null ? user.Tasks.Values : user.Tasks.Values.Where(t => t.Id == taskId.Value);
@@ -1519,12 +1546,12 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public WeekPlan? GetWeekPlan(string userId, DateOnly weekStart)
     {
-        lock (_gate) return GetUser(userId).WeekPlans.GetValueOrDefault(weekStart);
+        using (EnterOwnerScope(userId)) return GetUser(userId).WeekPlans.GetValueOrDefault(weekStart);
     }
 
     public WeekPlan UpsertWeekPlan(string userId, DateOnly weekStart, UpsertWeekPlanRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.WeekPlans.TryGetValue(weekStart, out var plan))
@@ -1545,12 +1572,12 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public List<RuleDefinition> GetRules(string userId)
     {
-        lock (_gate) return GetUser(userId).Rules.Values.OrderBy(x => x.Name).ToList();
+        using (EnterOwnerScope(userId)) return GetUser(userId).Rules.Values.OrderBy(x => x.Name).ToList();
     }
 
     public RuleDefinition CreateRule(string userId, CreateRuleRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var rule = new RuleDefinition
@@ -1572,7 +1599,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public RuleDefinition? UpdateRule(string userId, Guid ruleId, UpdateRuleRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Rules.TryGetValue(ruleId, out var rule)) return null;
@@ -1589,7 +1616,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object EvaluateRules(string userId, EvaluateRulesRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var ruleResults = new List<object>();
@@ -1612,7 +1639,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object SyncCalendarTask(string userId, Guid taskId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return new { synced = false, reason = "task_not_found" };
@@ -1625,7 +1652,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object UnsyncCalendarTask(string userId, Guid taskId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             if (!user.Tasks.TryGetValue(taskId, out var task)) return new { unsynced = false, reason = "task_not_found" };
@@ -1644,7 +1671,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object GetCalendarConflicts(string userId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var tasks = GetUser(userId).Tasks.Values.Where(x => x.StartAt is not null && x.EndAt is not null).ToList();
             var conflicts = new List<object>();
@@ -1664,12 +1691,12 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public NotificationSettings GetNotificationSettings(string userId)
     {
-        lock (_gate) return GetUser(userId).NotificationSettings;
+        using (EnterOwnerScope(userId)) return GetUser(userId).NotificationSettings;
     }
 
     public NotificationSettings UpdateNotificationSettings(string userId, UpdateNotificationSettingsRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             user.NotificationSettings = new NotificationSettings
@@ -1685,7 +1712,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object TriggerDailyDigest(string userId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var schedule = new NotificationSchedule(Guid.NewGuid(), null, "Teams", DateTimeOffset.UtcNow, "Triggered", DateTimeOffset.UtcNow);
@@ -1697,7 +1724,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public List<NotificationSchedule> GetNotificationSchedules(string userId)
     {
-        lock (_gate) return GetUser(userId).NotificationSchedules.OrderByDescending(x => x.ScheduledAt).ToList();
+        using (EnterOwnerScope(userId)) return GetUser(userId).NotificationSchedules.OrderByDescending(x => x.ScheduledAt).ToList();
     }
 
     public IReadOnlyCollection<string> GetKnownUserIds()
@@ -1707,7 +1734,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public bool IsTeamsConnected(string userId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var key = user.Integrations.Keys.FirstOrDefault(k => string.Equals(k, "Teams", StringComparison.OrdinalIgnoreCase));
@@ -1717,7 +1744,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public DailyDigestPayload GetDailyDigestPayload(string userId, DateOnly? onDate)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var date = onDate ?? DateOnly.FromDateTime(DateTime.Now);
@@ -1746,7 +1773,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public bool HasDailyDigestAttemptForDate(string userId, DateOnly localDate, TimeZoneInfo timeZone)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             return user.NotificationSchedules.Any(s =>
@@ -1757,7 +1784,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public NotificationSchedule RecordDailyDigestAttempt(string userId, string status, DateTimeOffset? sentAt)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var schedule = new NotificationSchedule(
@@ -1775,12 +1802,12 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public List<IntegrationSetting> GetIntegrations(string userId)
     {
-        lock (_gate) return GetUser(userId).Integrations.Values.ToList();
+        using (EnterOwnerScope(userId)) return GetUser(userId).Integrations.Values.ToList();
     }
 
     public IntegrationSetting ConnectMicrosoft(string userId, ConnectMicrosoftRequest req)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var item = new IntegrationSetting
@@ -1808,7 +1835,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object DisconnectIntegration(string userId, string provider)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var integrationKey = user.Integrations.Keys.FirstOrDefault(k =>
@@ -1829,7 +1856,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object TestIntegration(string userId, string provider)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var user = GetUser(userId);
             var integrationKey = user.Integrations.Keys.FirstOrDefault(k =>
@@ -1843,7 +1870,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object GetProgressReport(string userId, ReportWindow window)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var tasks = FilterByWindow(GetUser(userId).Tasks.Values, window).ToList();
             var progressValues = tasks.Select(GetTaskProgress).ToList();
@@ -1854,7 +1881,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object GetTimelineReport(string userId, ReportWindow window)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var tasks = FilterByWindow(GetUser(userId).Tasks.Values, window)
                 .OrderBy(x => x.PlannedWeekStart)
@@ -1872,7 +1899,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object GetScorecard(string userId, ReportWindow window)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var tasks = FilterByWindow(GetUser(userId).Tasks.Values, window).ToList();
             var planned = tasks.Count;
@@ -1894,7 +1921,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object GetStreaks(string userId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var completedDays = GetUser(userId).Tasks.Values
                 .Where(t => GetTaskProgress(t) >= 100)
@@ -1916,7 +1943,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object GetConsistency(string userId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var tasks = GetUser(userId).Tasks.Values.ToList();
             var avg = tasks.Count == 0 ? 0 : tasks.Average(GetTaskProgress);
@@ -1926,7 +1953,7 @@ public sealed class RoraQuestService(IRoraQuestStore store, ITaskAssetStorage? a
 
     public object GetPlanningRecommendation(string userId)
     {
-        lock (_gate)
+        using (EnterOwnerScope(userId))
         {
             var tasks = GetUser(userId).Tasks.Values.ToList();
             var completionRate = tasks.Count == 0 ? 0 : (double)tasks.Count(t => GetTaskProgress(t) >= 100) / tasks.Count * 100;
@@ -2176,11 +2203,22 @@ public sealed class TaskItem
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public int RowVersion { get; set; } = 1;
-    public List<TaskSubStep> SubSteps { get; } = [];
-    public List<TaskLink> Links { get; } = [];
-    public List<TaskAsset> Assets { get; } = [];
-    public List<TaskStatusEvent> StatusEvents { get; } = [];
-    public List<TaskSpilloverEvent> Spillovers { get; } = [];
+    public List<TaskSubStep> SubSteps { get; private set; } = [];
+    public List<TaskLink> Links { get; private set; } = [];
+    public List<TaskAsset> Assets { get; private set; } = [];
+    public List<TaskStatusEvent> StatusEvents { get; private set; } = [];
+    public List<TaskSpilloverEvent> Spillovers { get; private set; } = [];
+
+    internal TaskItem CopyForProgressMutation()
+    {
+        var copy = (TaskItem)MemberwiseClone();
+        copy.SubSteps = SubSteps.Select(s => new TaskSubStep(s.Id, s.Title, s.IsDone, s.OrderIndex, s.CompletedAt, s.RowVersion, s.Weight)).ToList();
+        copy.StatusEvents = StatusEvents.Select(e => new TaskStatusEvent(e.Id, e.FromStatus, e.ToStatus, e.ChangedAt)).ToList();
+        copy.Links = Links.Select(l => new TaskLink(l.Id, l.Url, l.Label, l.SourceType)).ToList();
+        copy.Assets = Assets.Select(a => new TaskAsset(a.Id, a.AssetType, a.StoragePathOrUrl, a.FileName, a.ContentType, a.SizeBytes, a.CreatedAt)).ToList();
+        copy.Spillovers = Spillovers.Select(s => new TaskSpilloverEvent(s.Id, s.FromWeekStart, s.ToWeekStart, s.Reason, s.MovedAt)).ToList();
+        return copy;
+    }
 }
 
 public sealed class TaskSubStep(Guid id, string title, bool isDone, int orderIndex, DateTimeOffset? completedAt, int rowVersion, int weight = 0)
