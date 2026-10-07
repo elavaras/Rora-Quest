@@ -2,11 +2,15 @@
 /// Persistence boundary for the Rora Quest aggregate. Implementations load a
 /// fully-hydrated <see cref="UserData"/> graph for a user and persist the whole
 /// graph atomically. Two implementations exist:
-///   - <see cref="InMemoryRoraQuestStore"/> (default, no database required)
+///   - <see cref="InMemoryRoraQuestStore"/> (volatile tasks, durable Progress-only SQLite)
 ///   - <see cref="PostgresRoraQuestStore"/> (used when a connection string is configured)
 /// </summary>
 public interface IRoraQuestStore
 {
+    ProgressLedger Progress { get; }
+    IDisposable AcquireOwnerScope(string userId);
+    bool CommitTaskMutation(string userId, UserData prospective, ProgressUnit? unit, DateTimeOffset now, Action<DateTimeOffset> stamp);
+    T ReadProgress<T>(string userId, Func<ProgressRead, UserData, T> project);
     /// <summary>Loads (or creates an empty) fully-hydrated aggregate for the given user.</summary>
     UserData Load(string userId);
 
@@ -15,8 +19,8 @@ public interface IRoraQuestStore
 
     /// <summary>
     /// Deletes the given tasks (and their cascaded children) for a user with a single targeted
-    /// database delete, avoiding a full-aggregate delete-then-reinsert. Callers are expected to
-    /// have already removed the tasks from the in-memory graph (which is the cached reference).
+    /// database delete, avoiding a full-aggregate delete-then-reinsert. Callers remove
+    /// tasks from the in-memory graph only after this operation commits.
     /// Returns the number of task rows removed from the database.
     /// </summary>
     int DeleteTasks(string userId, IReadOnlyCollection<System.Guid> taskIds);
@@ -43,8 +47,24 @@ public interface IRoraQuestStore
 /// in place on the cached graph, so <see cref="Save"/> only needs to ensure the
 /// reference is registered.
 /// </summary>
-public sealed class InMemoryRoraQuestStore(AppState state) : IRoraQuestStore
+public sealed class InMemoryRoraQuestStore(AppState state, ProgressLedger progress) : IRoraQuestStore
 {
+    private readonly object _ownerGate = new();
+    public ProgressLedger Progress => progress;
+    public IDisposable AcquireOwnerScope(string userId)
+    {
+        Monitor.Enter(_ownerGate);
+        try
+        {
+            progress.InitializeOwner(userId);
+            return new ProgressScope(() => Monitor.Exit(_ownerGate));
+        }
+        catch { Monitor.Exit(_ownerGate); throw; }
+    }
+    public bool CommitTaskMutation(string userId, UserData prospective, ProgressUnit? unit, DateTimeOffset now, Action<DateTimeOffset> stamp) =>
+        progress.CommitMutation(userId, unit, now, stamp: stamp);
+    public T ReadProgress<T>(string userId, Func<ProgressRead, UserData, T> project) =>
+        progress.Read(userId, read => project(read, Load(userId)));
     public UserData Load(string userId)
     {
         if (!state.Users.TryGetValue(userId, out var user))
@@ -62,10 +82,9 @@ public sealed class InMemoryRoraQuestStore(AppState state) : IRoraQuestStore
 
     public int DeleteTasks(string userId, IReadOnlyCollection<System.Guid> taskIds)
     {
-        // In-memory graph is authoritative; the service has already removed the tasks.
-        // Nothing further to persist. Report how many of the requested ids are now absent.
+        // No persistent task graph in this mode. Publish only after the service's successful call.
         if (!state.Users.TryGetValue(userId, out var user)) return 0;
-        return taskIds.Count(id => !user.Tasks.ContainsKey(id));
+        return taskIds.Count(user.Tasks.ContainsKey);
     }
 
     public void SaveNotificationSettings(string userId, NotificationSettings settings)
@@ -93,4 +112,10 @@ public sealed class InMemoryRoraQuestStore(AppState state) : IRoraQuestStore
     {
         return state.Users.Keys.ToArray();
     }
+}
+
+internal sealed class ProgressScope(Action dispose) : IDisposable
+{
+    private Action? _dispose = dispose;
+    public void Dispose() => Interlocked.Exchange(ref _dispose, null)?.Invoke();
 }

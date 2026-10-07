@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { getApiAuthHeaders, getApiBaseUrl } from "../lib/user-session";
+import { entryWeek } from "../progress/dates";
 import { addDays, mondayOf, parseYmd, weekFromDateInput, ymd } from "./week-dates";
 import WeekPicker from "./week-picker";
 
@@ -220,7 +222,21 @@ function AddTaskForm({
 }
 
 export default function TasksPage() {
-  const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
+  return <Suspense fallback={<section className="page" role="status">Loading Tasks by Week…</section>}><TasksEntry /></Suspense>;
+}
+
+function TasksEntry() {
+  const params = useSearchParams();
+  const values = params.getAll("weekStart");
+  const value = values.length > 1 ? values : values[0];
+  const entry = entryWeek(value);
+  // Remount only on entry-week changes, including same-page query navigation.
+  // All initial refs and suppression flags precede the first loadWeek.
+  return <TasksClient key={JSON.stringify(value) ?? "default"} entry={entry} />;
+}
+
+function TasksClient({ entry }: { entry: ReturnType<typeof entryWeek> }) {
+  const [weekStart, setWeekStart] = useState<Date>(() => entry.week ? parseYmd(entry.week) : mondayOf(new Date()));
   const [view, setView] = useState<ViewMode>("grid");
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -235,11 +251,11 @@ export default function TasksPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const didAutoJumpToPlannedWeek = useRef(false);
-  const didNavigateWeek = useRef(false);
+  const didAutoJumpToPlannedWeek = useRef(Boolean(entry.week));
+  const didNavigateWeek = useRef(Boolean(entry.week));
   const weekRequestId = useRef(0);
   const activeWeekStartYmd = useRef(ymd(weekStart));
-  const initialWeekStartYmd = useRef(ymd(mondayOf(new Date())));
+  const initialWeekStartYmd = useRef(ymd(weekStart));
 
   const weekStartYmd = ymd(weekStart);
   const todayYmd = ymd(new Date());
@@ -558,6 +574,7 @@ export default function TasksPage() {
 
   return (
     <section className="page tasks-page">
+      {entry.invalid && <p role="status">The requested week is invalid. Use a Monday from 0001-01-01 through 9999-12-26. Showing the usual Tasks by Week view.</p>}
       <div className="card">
         <div className="week-toolbar">
           <div className="week-nav">

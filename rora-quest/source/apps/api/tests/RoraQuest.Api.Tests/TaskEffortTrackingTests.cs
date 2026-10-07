@@ -14,7 +14,7 @@ public class TaskEffortTrackingTests
     private static RoraQuestService CreateService()
     {
         var state = new AppState();
-        var store = new InMemoryRoraQuestStore(state);
+        var store = ProgressTestStores.Create(state);
         return new RoraQuestService(store);
     }
 

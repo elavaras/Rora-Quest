@@ -1,0 +1,53 @@
+.progress { min-width: 0; overflow-wrap: anywhere; }
+.progress h3 { margin-top: 0; }
+.progress p { line-height: 1.55; }
+.progress a { color: var(--color-crumb-link); text-underline-offset: 3px; }
+.progress button, .progress input, .progress select, .progress summary {
+  min-height: 44px;
+  max-width: 100%;
+  font: inherit;
+}
+.progress button {
+  background: var(--bg-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-muted);
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  white-space: normal;
+}
+.progress button:disabled { opacity: .5; cursor: not-allowed; }
+.progress :is(button, a, input, select, summary):focus-visible {
+  outline: 3px solid var(--color-crumb-link);
+  outline-offset: 3px;
+}
+.controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 16px 0; }
+.controls label { display: grid; gap: 6px; min-width: 0; max-width: 100%; color: var(--color-text); }
+.controls input, .controls select {
+  width: 100%; padding: 8px; border: 1px solid var(--color-muted);
+  border-radius: 6px; color: var(--color-text); background: var(--bg-surface);
+}
+.legend { display: flex; flex-wrap: wrap; gap: 10px 20px; padding: 0; list-style: none; line-height: 1.5; }
+.calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; max-width: 840px; }
+.weekday { text-align: center; font-size: .875rem; }
+.dayMeta { font-size: .65rem; line-height: 1; }
+.calendar .day { min-height: 62px; padding: 6px 2px; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.day.active { background: var(--bg-chip-done); color: var(--color-chip-done); font-weight: bold; }
+.day.selected { outline: 2px solid var(--color-text); outline-offset: 1px; }
+.day.gap { border: 2px dashed var(--color-text); background-image: repeating-linear-gradient(135deg, transparent, transparent 7px, var(--border) 7px, var(--border) 9px); }
+.day.selected:focus-visible { outline: 3px solid var(--color-crumb-link); outline-offset: 3px; }
+.dateList { list-style: none; padding: 0; display: grid; gap: 12px; }
+.dateList .day { display: flex; text-align: left; flex-wrap: wrap; gap: 8px; width: 100%; }
+.events, .tasks { padding-left: 24px; }
+.events li, .tasks li { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.events small { display: block; margin-top: 8px; line-height: 1.5; }
+.weekLink { display: inline-flex; align-items: center; min-height: 44px; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+@media (max-width: 480px) {
+  .progress :global(.card) { padding: 12px; }
+  .calendar { gap: 6px; }
+  .calendar .day { min-height: 52px; font-size: .875rem; }
+  .weekday { font-size: .7rem; }
+  .controls { gap: 8px; }
+  .controls label { flex-basis: 100%; }
+}

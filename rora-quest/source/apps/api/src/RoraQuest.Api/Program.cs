@@ -7,7 +7,9 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
+using RoraQuest.Api.Progress;
 
+if (ProgressMaintenance.TryRun(args)) return;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
@@ -154,6 +156,7 @@ builder.Services.AddAuthorization();
 
 // AppState backs the in-memory store (default when no database is configured).
 builder.Services.AddSingleton<AppState>();
+builder.Services.AddSingleton(TimeProvider.System);
 
 var connectionString = builder.Configuration.GetConnectionString("Postgres")
     ?? builder.Configuration["ConnectionStrings:Postgres"];
@@ -163,11 +166,14 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // PostgreSQL-backed persistence.
     var dataSource = new NpgsqlDataSourceBuilder(connectionString).Build();
     builder.Services.AddSingleton(dataSource);
+    builder.Services.AddSingleton(sp => new ProgressLedger(() => dataSource.OpenConnection(), true, sp.GetRequiredService<TimeProvider>()));
     builder.Services.AddSingleton<IRoraQuestStore, PostgresRoraQuestStore>();
 }
 else
 {
-    // Default: in-memory store, no database required.
+    // Tasks remain volatile; Progress requires an explicitly initialized durable sidecar.
+    builder.Services.AddSingleton(sp => new ProgressSqliteStore(builder.Configuration["Progress:DataDirectory"] ?? ProgressSqliteStore.DefaultDirectory));
+    builder.Services.AddSingleton(sp => new ProgressLedger(sp.GetRequiredService<ProgressSqliteStore>().Open, false, sp.GetRequiredService<TimeProvider>()));
     builder.Services.AddSingleton<IRoraQuestStore, InMemoryRoraQuestStore>();
 }
 
@@ -186,6 +192,7 @@ else
 builder.Services.AddSingleton<RoraQuestService>();
 builder.Services.AddHttpClient<ITeamsDigestSender, TeamsDigestSender>();
 builder.Services.AddSingleton<DailyDigestDispatcher>();
+builder.Services.AddHostedService<ProgressCaptureLifecycle>();
 builder.Services.AddHostedService<DailyDigestScheduler>();
 
 var app = builder.Build();
@@ -233,3 +240,5 @@ static string? GetTenantIdFromToken(SecurityToken securityToken)
 
     return null;
 }
+
+public partial class Program { }

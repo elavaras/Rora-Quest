@@ -12,8 +12,7 @@ const navItems = [
   { href: "/checklist", label: "Checklist Intake" },
   { href: "/tasks", label: "Tasks by Week" },
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/scorecard", label: "Scorecard" },
-  { href: "/tracking", label: "Streak & Consistency" },
+  { href: "/progress", label: "Progress" },
   { href: "/settings", label: "Settings" }
 ];
 

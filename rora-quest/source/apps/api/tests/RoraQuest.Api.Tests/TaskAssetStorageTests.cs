@@ -5,7 +5,7 @@ public class TaskAssetStorageTests
     private static RoraQuestService CreateService(RecordingAssetStorage storage)
     {
         var state = new AppState();
-        var store = new InMemoryRoraQuestStore(state);
+        var store = ProgressTestStores.Create(state);
         return new RoraQuestService(store, storage);
     }
 
