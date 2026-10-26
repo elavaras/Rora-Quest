@@ -11,6 +11,7 @@ const navItems = [
   { href: "/categories", label: "Categories" },
   { href: "/checklist", label: "Checklist Intake" },
   { href: "/tasks", label: "Tasks by Week" },
+  { href: "/tasks/search", label: "Search Tasks" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/progress", label: "Progress" },
   { href: "/settings", label: "Settings" }
