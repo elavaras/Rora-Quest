@@ -36,6 +36,46 @@ row, without a visible label or helper sentence.
 This only changes which week you view; it does not move tasks or change their
 schedules.
 
+## Searching tasks across all weeks
+
+Open **Search Tasks** in the sidebar, or **Search tasks across all weeks** on the
+Tasks by Week page. Enter a task name (for example `cakes`, `two sum`, or
+`three sum`), category, or subcategory, then press Enter or **Search**.
+
+- Matching is a case-insensitive literal substring. Surrounding whitespace is
+  ignored; internal spaces and punctuation are literal, not wildcards. Search
+  does not examine task descriptions/notes or translate `two sum` into `2sum`.
+- Category matches include tasks in descendant subcategories. This also covers
+  manually created tasks whose category selection is a subcategory.
+- Results include all matching tasks across every week and all statuses, with
+  no added result cap. Existing task ordering and duplicate-import handling are
+  retained. The list shows current category names, status, planned day, and week.
+- Open a task title to use its existing details/editing screen, or its **Week of**
+  link to view that week. Searching never moves tasks or changes task controls.
+- Blank input and **Clear** show guidance without fetching the whole catalog.
+  Loading, no results, and errors are distinct states. Resubmit to retry errors.
+  Editing/clearing a query cancels pending results and hides old matches.
+- Requests retain the existing current-user credentials and no-store behavior.
+  Search text/results are kept in page memory, not saved to local storage or URL
+  history. Leaving/reopening search starts with a blank form.
+
+### API compatibility
+
+`GET /api/tasks?search=two%20sum` adds an optional `search` query parameter to the
+existing task-list endpoint. It searches task titles OR current category names
+OR current subcategory names (including descendants), within the current owner's
+existing scope. It returns the same complete TaskItem JSON array as before.
+
+Absent, empty, or whitespace-only `search` is a no-op. Existing `categoryId`,
+`subCategoryId`, `status`, `weekStart`, `from`, and `to` filters retain their
+semantics and are ANDed with search. Repeated search parameters use the first
+value, consistent with other task-list parameters.
+
+No database migration or existing-client migration is needed. Deploy the updated
+API before the new search UI: an older API ignores the optional parameter and
+would return unfiltered results. No authentication or authorization changes are
+part of this feature.
+
 ## Account navigation
 
 The top-right initials button opens an account menu with the signed-in user's
@@ -133,3 +173,25 @@ unchanged login/logout destinations, long names/emails, and 320-1920px layouts
 in light/dark themes. All API requests and authentication redirects are mocked.
 `USER_NAV_TEST_ORIGIN` and `USER_NAV_TEST_BROWSER` override the server and browser;
 `USER_NAV_SCREENSHOT_DIR` optionally saves screenshots outside the repository.
+
+### Search regression checks
+
+`npm test` includes dependency-free search request/encoding, category-context,
+completeness, blank/error, and cancellation checks. Backend
+`TaskSearchTests`/`TaskSearchHttpTests` cover requested task names, literal matching,
+hierarchy/assignment layouts, all statuses/weeks, 137 matching tasks, ownership,
+renames/missing/cyclic categories, and compatibility with existing filters.
+
+```powershell
+# From source/apps/api:
+dotnet test .\tests\RoraQuest.Api.Tests\RoraQuest.Api.Tests.csproj -c Release --filter "FullyQualifiedName~TaskSearch"
+```
+
+With a successfully built app served locally and the optional browser tooling
+above, run `node tests\task-search.browser.cjs` from `source/apps/web`.
+`TASK_SEARCH_TEST_ORIGIN` and `TASK_SEARCH_TEST_BROWSER` override the default
+origin and installed browser channel. All API traffic is synthetic; the suite
+checks both navigation entry points, result links/category context, 137 results,
+empty/error/retry/loading/clear and stale-request handling, text escaping, keyboard
+controls, and mobile/desktop layouts in light/dark themes. It does not substitute
+for the real backend search tests.

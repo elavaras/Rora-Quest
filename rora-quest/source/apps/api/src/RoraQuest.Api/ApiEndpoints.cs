@@ -902,6 +902,30 @@ public sealed partial class RoraQuestService(IRoraQuestStore store, ITaskAssetSt
             var user = GetUser(userId);
             HealDuplicateTasks(user, userId);
             var tasks = user.Tasks.Values.AsEnumerable();
+            var search = query.Search?.Trim();
+            if (!string.IsNullOrEmpty(search))
+            {
+                // Categories can be stored in either task field (manual tasks may
+                // put a child in CategoryId). Include descendants of matching names.
+                var matchingCategoryIds = user.Categories.Values
+                    .Where(c => c.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+                    .Select(c => c.Id)
+                    .ToHashSet();
+                var children = user.Categories.Values.ToLookup(c => c.ParentCategoryId);
+                var pending = new Queue<Guid>(matchingCategoryIds);
+                while (pending.TryDequeue(out var categoryId))
+                {
+                    foreach (var child in children[categoryId])
+                    {
+                        if (matchingCategoryIds.Add(child.Id)) pending.Enqueue(child.Id);
+                    }
+                }
+
+                tasks = tasks.Where(t =>
+                    t.Title.Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || (t.CategoryId is Guid catId && matchingCategoryIds.Contains(catId))
+                    || (t.SubCategoryId is Guid subId && matchingCategoryIds.Contains(subId)));
+            }
             if (query.CategoryId is not null) tasks = tasks.Where(x => x.CategoryId == query.CategoryId);
             if (query.SubCategoryId is not null) tasks = tasks.Where(x => x.SubCategoryId == query.SubCategoryId);
             if (query.Status is not null) tasks = tasks.Where(x => x.Status == query.Status);
@@ -2422,6 +2446,7 @@ public sealed class TaskQuery
     public Guid? CategoryId { get; set; }
     public Guid? SubCategoryId { get; set; }
     public TaskStatus? Status { get; set; }
+    public string? Search { get; set; }
 
     public static TaskQuery FromHttp(IQueryCollection q)
     {
@@ -2439,7 +2464,8 @@ public sealed class TaskQuery
             WeekStart = ParseDate("weekStart"),
             CategoryId = ParseGuid("categoryId"),
             SubCategoryId = ParseGuid("subCategoryId"),
-            Status = ParseStatus()
+            Status = ParseStatus(),
+            Search = q["search"].FirstOrDefault()
         };
     }
 }

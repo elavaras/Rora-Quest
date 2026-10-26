@@ -622,6 +622,7 @@ function TasksClient({ entry }: { entry: ReturnType<typeof entryWeek> }) {
             {renderBulkToolbar()}
           </div>
         </div>
+        <p><Link href="/tasks/search">Search tasks across all weeks</Link></p>
         {!loading && (
           <p className="muted" style={{ fontSize: "0.875rem", margin: "0.25rem 0 0 0" }}>
             Total actual hours: {totalActualHours.toFixed(1)}h
